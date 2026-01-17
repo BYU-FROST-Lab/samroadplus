@@ -8,7 +8,11 @@ import cv2
 IMAGE_SIZE = 2048
 KEYPOINT_RADIUS = 3
 ROAD_WIDTH = 3
-output_dir = '../processed'
+# Load GT Graph
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # directory where script lives
+print(BASE_DIR)
+DATA_DIR = os.path.join(BASE_DIR, "20cities")
+output_dir = os.path.join(BASE_DIR, "processed")
 
 
 def create_directory(dir, delete=False):
@@ -83,8 +87,9 @@ for tile_index in range(3572):
     edges = []
     vertex_flag = True
 
-    # Load GT Graph
-    gt_graph = pickle.load(open(f"../region_{tile_index}_refine_gt_graph.p", 'rb'))
+    
+
+    gt_graph = pickle.load(open(os.path.join(DATA_DIR, f"region_{tile_index}_refine_gt_graph.p"), 'rb'))
     graph = nx.Graph()  # undirected
     for n, neis in gt_graph.items():
         for nei in neis:
