@@ -20,3 +20,18 @@ Download the following (__check official README for where to place files__):
     - [20cities](https://drive.google.com/drive/folders/1FlMcO3Jr8W4qboZUwxgRn6AlYc-AuxQ2)
         - Download 'data.zip,' look for and keep '20cities' folder
 
+Clone the following repositories:
+- [Segment Anything Model (SAM)](https://github.com/facebookresearch/segment-anything)
+    - clone inside of 'sam' folder 
+        ```bash
+        cd sam
+        git clone git@github.com:facebookresearch/segment-anything.git
+        cd segment-anything; pip install -e .
+        ```
+- [Detectron2](https://github.com/facebookresearch/detectron2)
+    ```bash
+    git clone https://github.com/facebookresearch/detectron2.git
+    pip install -e . --no-build-isolation
+    ```
+
+
