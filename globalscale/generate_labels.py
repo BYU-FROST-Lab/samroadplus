@@ -10,7 +10,7 @@ KEYPOINT_RADIUS = 3
 ROAD_WIDTH = 3
 # Load GT Graph
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # directory where script lives
-DATA_DIR = os.path.join(BASE_DIR, "20cities")
+DATA_DIR = os.path.join(BASE_DIR, "Global-Scale")
 OUTPUT_DIR = os.path.join(BASE_DIR, "processed")
 
 
@@ -77,52 +77,63 @@ def draw_line_segments_on_image(size, line_segments, width):
 
     return image
 
+GLOBALSCALE_DIRS = [
+    d for d in os.listdir(DATA_DIR)
+    if os.path.isdir(os.path.join(DATA_DIR, d))
+] # adds the folders inside of Global-Scale
 
-create_directory(OUTPUT_DIR, delete=True)
+OUTPUT_DIR_PROCS = []
+for DIR in GLOBALSCALE_DIRS:
+    OUTPUT_DIR_PROC = os.path.join(OUTPUT_DIR, DIR) # Separate processed folders as labeled ny the different dataset subdivs
+    OUTPUT_DIR_PROCS.append(OUTPUT_DIR_PROC)
+    create_directory(OUTPUT_DIR_PROC, delete=True)
 
-files = sorted(
-    [f for f in os.listdir(DATA_DIR)
-     if f.endswith("_refine_gt_graph.p")],
-    key=lambda x: int(x.split("_")[1])
-) # gets the exact number of files to avoid FileNotFoundError
-
-for fname in files:
-    tile_index = fname.split("_")[1]
+for i, DIR in enumerate(GLOBALSCALE_DIRS):
+    print("\n")
+    print(f"----------PROCESSING '{DIR}' FOLDER----------")
+    DATA_DIR_REC = os.path.join(DATA_DIR, DIR) # Accessing the specific folder within "Global-scale"
+    files = sorted(
+        [f for f in os.listdir(DATA_DIR_REC)
+        if f.endswith("_refine_gt_graph.p")],
+        key=lambda x: int(x.split("_")[1])
+    ) # gets the exact number of files to avoid FileNotFoundError and sorts them by tile index
     
-    print(f'Processing cityscale tile {tile_index}.')
-    vertices = []
-    edges = []
-    vertex_flag = True
+    for fname in files:
+        tile_index = fname.split("_")[1]
+        print(f'Processing globalscale {DIR} tile {tile_index}.')
+        vertices = []
+        edges = []
+        vertex_flag = True
 
-    
+        
 
-    gt_graph = pickle.load(open(os.path.join(DATA_DIR, f"region_{tile_index}_refine_gt_graph.p"), 'rb'))
-    graph = nx.Graph()  # undirected
-    for n, neis in gt_graph.items():
-        for nei in neis:
-            graph.add_edge((int(n[1]), int(n[0])), (int(nei[1]), int(nei[0])))
+        gt_graph = pickle.load(open(os.path.join(DATA_DIR_REC, f"region_{tile_index}_refine_gt_graph.p"), 'rb'))
+        graph = nx.Graph()  # undirected
+        for n, neis in gt_graph.items():
+            for nei in neis:
+                graph.add_edge((int(n[1]), int(n[0])), (int(nei[1]), int(nei[0])))
 
-    # Collect key nodes (degree != 2)
-    key_nodes = []
-    key_degree = []
-    for node, degree in graph.degree():
-  
+        # Collect key nodes (degree != 2)
+        key_nodes = []
+        key_degree = []
+        for node, degree in graph.degree():
 
-        if degree != 2:
-            key_nodes.append(node)
-            key_degree.append(degree)
 
-    # Create key point mask
-   # image_deg = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.uint8)
+            if degree != 2:
+                key_nodes.append(node)
+                key_degree.append(degree)
 
-    #Create road mask
-    road_mask = draw_line_segments_on_image(
-         size=IMAGE_SIZE, line_segments=graph.edges(), width=ROAD_WIDTH)
+        # Create key point mask
+        # image_deg = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.uint8)
 
-    keypoint_mask = draw_points_on_image( size=IMAGE_SIZE, degrees=key_degree, points=key_nodes,
-                                                   radius=KEYPOINT_RADIUS)
-    #print(degree_mask)
-    cv2.imwrite(os.path.join(OUTPUT_DIR, f'keypoint_mask_{tile_index}.png'), keypoint_mask)
-    cv2.imwrite(os.path.join(OUTPUT_DIR, f'road_mask_{tile_index}.png'), road_mask)
-    #cv2.imwrite(os.path.join(OUTPUT_DIR, f'degree_mask_{tile_index}.png'), degree_mask)
+        #Create road mask
+        road_mask = draw_line_segments_on_image(
+            size=IMAGE_SIZE, line_segments=graph.edges(), width=ROAD_WIDTH)
+
+        keypoint_mask = draw_points_on_image( size=IMAGE_SIZE, degrees=key_degree, points=key_nodes,
+                                                    radius=KEYPOINT_RADIUS)
+        #print(degree_mask)
+        cv2.imwrite(os.path.join(OUTPUT_DIR_PROCS[i], f'keypoint_mask_{tile_index}.png'), keypoint_mask)
+        cv2.imwrite(os.path.join(OUTPUT_DIR_PROCS[i], f'road_mask_{tile_index}.png'), road_mask)
+        #cv2.imwrite(os.path.join(OUTPUT_DIR, f'degree_mask_{tile_index}.png'), degree_mask)
 
