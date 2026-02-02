@@ -84,7 +84,7 @@ GLOBALSCALE_DIRS = [
 
 OUTPUT_DIR_PROCS = []
 for DIR in GLOBALSCALE_DIRS:
-    OUTPUT_DIR_PROC = os.path.join(OUTPUT_DIR, DIR) # Separate processed folders as labeled ny the different dataset subdivs
+    OUTPUT_DIR_PROC = os.path.join(OUTPUT_DIR, DIR) # Separate processed folders as labeled by the different dataset subdivs
     OUTPUT_DIR_PROCS.append(OUTPUT_DIR_PROC)
     create_directory(OUTPUT_DIR_PROC, delete=True)
 
