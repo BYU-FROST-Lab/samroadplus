@@ -1,4 +1,4 @@
-DATASET: 'globalscale'
+DATASET: 'globalscale_outdomain'
 
 # IN1k + MAE only
 NO_SAM: False
