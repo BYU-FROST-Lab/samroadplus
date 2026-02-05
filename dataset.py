@@ -271,22 +271,105 @@ class SatMapDataset(Dataset):
         
             # coord-transform = (r, c) -> (x, y)
             # takes [N, 2] points
-            coord_transform = lambda v : v[:, ::-1]
+            self,coord_transform = lambda v : v[:, ::-1]
 
         elif self.config.DATASET == 'globalscale':
+            DIR_GS = os.path.join(BASE_DIR, self.config.DATASET)
+            DATA_DIR = os.path.join(DIR_GS, "Global-Scale")
+            PROCESSED_DIR = os.path.join(DIR_GS, "processed")
+
+            GLOBALSCALE_DIRS = [
+                d for d in os.listdir(DATA_DIR)
+                if os.path.isdir(os.path.join(DATA_DIR, d))
+            ] # adds the folders inside of Global-Scale
+
+            patterns = {}
+
             self.IMAGE_SIZE = 2048
             # TODO: SAMPLE_MARGIN here is for training, the one in config is for inference
             self.SAMPLE_MARGIN = 64
-            rgb_pattern = '../region_{}_sat.png'
-            keypoint_mask_pattern = '../keypoint_mask_{}.png'
-            road_mask_pattern = '../road_mask_{}.png'
-            gt_graph_pattern = '../region_{}_refine_gt_graph.p'
 
-            train, val, test, test_out = globalscale_data_partition()
+            for i, DIR in enumerate(GLOBALSCALE_DIRS):
+                print("\n")
+                print(f"----------PROCESSING '{DIR}' FOLDER----------")
+                DATA_DIR_REC = os.path.join(DATA_DIR, DIR) # Accessing the specific folder within "Global-scale"
+                PROCESSED_DIR_REC = os.path.join(PROCESSED_DIR, DIR)
+
+                rgb_pattern = os.path.join(DATA_DIR_REC, 'region_{}_sat.png')
+                keypoint_mask_pattern = os.path.join(PROCESSED_DIR_REC, 'keypoint_mask_{}.png')
+                road_mask_pattern = os.path.join(PROCESSED_DIR_REC, 'road_mask_{}.png') 
+                gt_graph_pattern = os.path.join(DATA_DIR_REC, 'region_{}_refine_gt_graph.p')
+
+                patterns[DIR] = {"rgb_pattern": rgb_pattern, 
+                                 "keypoint_mask_pattern": keypoint_mask_pattern, 
+                                 "road_mask_pattern": road_mask_pattern, 
+                                 "gt_graph_pattern": gt_graph_pattern}
+                
+                # coord-transform = (r, c) -> (x, y)
+                # takes [N, 2] points
+            self.coord_transform = lambda v : v[:, ::-1]
+
+            self.is_train = is_train
+
+            train_split = ["train", "val"]
+            test_split = ["in-domain-test"]
+
+
+            folders = train_split if self.is_train else test_split
             
-            # coord-transform = (r, c) -> (x, y)
-            # takes [N, 2] points
-            coord_transform = lambda v : v[:, ::-1]
+            # self.tile_indices = tile_indices
+
+            self.trainnum = "train"
+            # Stores all imgs in memory.
+            self.rgbs, self.keypoint_masks, self.road_masks  = [], [], []
+            # For graph label generation.
+            self.graph_label_generators = []
+
+            self.samples = []
+
+            ##### FAST DEBUG
+            if dev_run:
+                tile_indices = tile_indices[:4]
+            ##### FAST DEBUG
+            for folder in folders:
+                DATA_DIR_REC = os.path.join(DATA_DIR, folder) # Accessing the specific folder within "Global-scale"
+                files = sorted(
+                    [f for f in os.listdir(DATA_DIR_REC)
+                    if f.endswith("_refine_gt_graph.p")],
+                    key=lambda x: int(x.split("_")[1])
+                ) # gets the exact number of files to avoid FileNotFoundError and sorts them by tile index
+
+                for fname in files:
+                    tile_idx = fname.split("_")[1]
+                    print(f'Processing globalscale {folder} tile {tile_idx}.')
+
+                    self.samples.append({
+                    "tile_idx": tile_idx,
+                    "folder": folder,
+                    "rgb": patterns[folder]["rgb_pattern"].format(tile_idx),
+                    "road_mask": patterns[folder]["road_mask_pattern"].format(tile_idx),
+                    "keypoint_mask": patterns[folder]["keypoint_mask_pattern"].format(tile_idx),
+                    "graph": patterns[folder]["gt_graph_pattern"].format(tile_idx),
+                    })
+            
+            self.sample_min = self.SAMPLE_MARGIN
+            self.sample_max = self.IMAGE_SIZE - (self.config.PATCH_SIZE + self.SAMPLE_MARGIN)
+
+            if not self.is_train:
+                DATA_DIR_REC = os.path.join(DATA_DIR, folders[0]) # Accessing the specific folder within "Global-scale"
+                files = sorted(
+                    [f for f in os.listdir(DATA_DIR_REC)
+                    if f.endswith("_refine_gt_graph.p")],
+                    key=lambda x: int(x.split("_")[1])
+                )
+                eval_patches_per_edge = math.ceil((self.IMAGE_SIZE - 2 * self.SAMPLE_MARGIN) / self.config.PATCH_SIZE)
+                self.eval_patches = []
+                for i in range(len(files)):
+                    self.eval_patches += get_patch_info_one_img(
+                        i, self.IMAGE_SIZE, self.SAMPLE_MARGIN, self.config.PATCH_SIZE, eval_patches_per_edge
+                    )
+
+            return
 
         elif self.config.DATASET == 'spacenet':
             DIR_SN = os.path.join(BASE_DIR, self.config.DATASET)
@@ -304,7 +387,7 @@ class SatMapDataset(Dataset):
 
             # coord-transform ??? -> (x, y)
             # takes [N, 2] points
-            coord_transform = lambda v : np.stack([v[:, 1], 400 - v[:, 0]], axis=1)
+            self.coord_transform = lambda v : np.stack([v[:, 1], 400 - v[:, 0]], axis=1)
 
         self.is_train = is_train
 
@@ -326,6 +409,7 @@ class SatMapDataset(Dataset):
         ##### FAST DEBUG
         for tile_idx in tile_indices:
             print(f'loading tile {tile_idx}')
+
             rgb_path = rgb_pattern.format(tile_idx)
             road_mask_path = road_mask_pattern.format(tile_idx)
             keypoint_mask_path = keypoint_mask_pattern.format(tile_idx)
@@ -339,7 +423,7 @@ class SatMapDataset(Dataset):
             self.rgbs.append(read_rgb_img(rgb_path))
             self.road_masks.append(cv2.imread(road_mask_path, cv2.IMREAD_GRAYSCALE))
             self.keypoint_masks.append(cv2.imread(keypoint_mask_path, cv2.IMREAD_GRAYSCALE))
-            graph_label_generator = GraphLabelGenerator(config, gt_graph_adj, coord_transform)
+            graph_label_generator = GraphLabelGenerator(config, gt_graph_adj, self.coord_transform)
             self.graph_label_generators.append(graph_label_generator)
         
         self.sample_min = self.SAMPLE_MARGIN
@@ -361,45 +445,120 @@ class SatMapDataset(Dataset):
             elif self.config.DATASET == 'spacenet':               
                 num_patches_per_image = max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2
                 return len(self.trainnum) * num_patches_per_image
+            else:
+                return len(self.samples)
         else:
             return len(self.eval_patches)
 
     def __getitem__(self, idx):
-        
-        if self.is_train:
-            img_idx = np.random.randint(low=0, high=len(self.rgbs))
-            begin_x = np.random.randint(low=self.sample_min, high=self.sample_max+1)
-            begin_y = np.random.randint(low=self.sample_min, high=self.sample_max+1)
-            end_x, end_y = begin_x + self.config.PATCH_SIZE, begin_y + self.config.PATCH_SIZE
+
+        if self.config.DATASET == "cityscale" or self.config.DATASET == "spacenet":
+            if self.is_train:
+                img_idx = np.random.randint(low=0, high=len(self.rgbs))
+                begin_x = np.random.randint(low=self.sample_min, high=self.sample_max+1)
+                begin_y = np.random.randint(low=self.sample_min, high=self.sample_max+1)
+                end_x, end_y = begin_x + self.config.PATCH_SIZE, begin_y + self.config.PATCH_SIZE
+            else:
+                # Returns eval patch
+                img_idx, (begin_x, begin_y), (end_x, end_y) = self.eval_patches[idx]  
+            # Crop patch imgs and masks
+            rgb_patch = self.rgbs[img_idx][begin_y:end_y, begin_x:end_x, :]
+            keypoint_mask_patch = self.keypoint_masks[img_idx][begin_y:end_y, begin_x:end_x]
+            road_mask_patch = self.road_masks[img_idx][begin_y:end_y, begin_x:end_x]    
+            # Augmentation
+            rot_index = 0
+            if self.is_train:
+                rot_index = np.random.randint(0, 4)
+                # CCW
+                rgb_patch = np.rot90(rgb_patch, rot_index, [0,1]).copy()
+                keypoint_mask_patch = np.rot90(keypoint_mask_patch, rot_index, [0, 1]).copy()
+                road_mask_patch = np.rot90(road_mask_patch, rot_index, [0, 1]).copy()       
+            # Sample graph labels from patch
+            patch = ((begin_x, begin_y), (end_x, end_y))
+            # points are img (x, y) inside the patch.
+            graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)       
+            pairs, connected, valid = zip(*topo_samples)  
+            # rgb: [H, W, 3] 0-255
+            # masks: [H, W] 0-1
+            return {
+                'rgb': torch.tensor(rgb_patch, dtype=torch.float32),
+                'keypoint_mask': torch.tensor(keypoint_mask_patch, dtype=torch.float32) / 255.0,
+                'road_mask': torch.tensor(road_mask_patch, dtype=torch.float32) / 255.0,
+                
+                'graph_points': torch.tensor(graph_points, dtype=torch.float32),
+                'pairs': torch.tensor(pairs, dtype=torch.int32),
+                'connected': torch.tensor(connected, dtype=torch.bool),
+                'valid': torch.tensor(valid, dtype=torch.bool),
+            }
+
         else:
-            # Returns eval patch
-            img_idx, (begin_x, begin_y), (end_x, end_y) = self.eval_patches[idx]  
-        # Crop patch imgs and masks
-        rgb_patch = self.rgbs[img_idx][begin_y:end_y, begin_x:end_x, :]
-        keypoint_mask_patch = self.keypoint_masks[img_idx][begin_y:end_y, begin_x:end_x]
-        road_mask_patch = self.road_masks[img_idx][begin_y:end_y, begin_x:end_x]    
-        # Augmentation
-        rot_index = 0
-        if self.is_train:
-            rot_index = np.random.randint(0, 4)
-            # CCW
-            rgb_patch = np.rot90(rgb_patch, rot_index, [0,1]).copy()
-            keypoint_mask_patch = np.rot90(keypoint_mask_patch, rot_index, [0, 1]).copy()
-            road_mask_patch = np.rot90(road_mask_patch, rot_index, [0, 1]).copy()       
-        # Sample graph labels from patch
-        patch = ((begin_x, begin_y), (end_x, end_y))
-        # points are img (x, y) inside the patch.
-        graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)       
-        pairs, connected, valid = zip(*topo_samples)  
-        # rgb: [H, W, 3] 0-255
-        # masks: [H, W] 0-1
-        return {
-            'rgb': torch.tensor(rgb_patch, dtype=torch.float32),
-            'keypoint_mask': torch.tensor(keypoint_mask_patch, dtype=torch.float32) / 255.0,
-            'road_mask': torch.tensor(road_mask_patch, dtype=torch.float32) / 255.0,
+            # --- Globalscale Logic ---
             
-            'graph_points': torch.tensor(graph_points, dtype=torch.float32),
-            'pairs': torch.tensor(pairs, dtype=torch.int32),
-            'connected': torch.tensor(connected, dtype=torch.bool),
-            'valid': torch.tensor(valid, dtype=torch.bool),
-        }
+            # STEP 1: RESOLVE INDICES
+            # We must determine WHICH image to load and WHICH crop to take.
+            if self.is_train:
+                # Training: idx maps directly to the list of image tiles
+                img_idx = idx
+                sample = self.samples[img_idx]
+                
+                # Random crop generation for training
+                h, w = 2048, 2048 # Hardcoded size based on your init
+                sample_min = self.SAMPLE_MARGIN
+                sample_max = h - (self.config.PATCH_SIZE + self.SAMPLE_MARGIN)
+                
+                begin_x = np.random.randint(low=sample_min, high=sample_max + 1)
+                begin_y = np.random.randint(low=sample_min, high=sample_max + 1)
+                rot_index = np.random.randint(0, 4)
+                
+            else:
+                # Validation: idx maps to a specific PATCH in eval_patches
+                # We need to look up which image this patch belongs to
+                img_idx, (begin_x, begin_y), (end_x, end_y) = self.eval_patches[idx]
+                sample = self.samples[img_idx] # <--- THIS FIXES THE CRASH
+                
+                # No rotation for validation
+                rot_index = 0
+
+            # STEP 2: LOAD DATA
+            rgb = read_rgb_img(sample["rgb"])
+            road_mask = cv2.imread(sample["road_mask"], cv2.IMREAD_GRAYSCALE)
+            keypoint_mask = cv2.imread(sample["keypoint_mask"], cv2.IMREAD_GRAYSCALE)
+            
+            # STEP 3: CROP
+            end_x, end_y = begin_x + self.config.PATCH_SIZE, begin_y + self.config.PATCH_SIZE
+            
+            rgb_patch = rgb[begin_y:end_y, begin_x:end_x, :]
+            keypoint_mask_patch = keypoint_mask[begin_y:end_y, begin_x:end_x]
+            road_mask_patch = road_mask[begin_y:end_y, begin_x:end_x]
+            
+            # STEP 4: AUGMENTATION (Rotation)
+            if rot_index > 0:
+                rgb_patch = np.rot90(rgb_patch, rot_index, [0, 1]).copy()
+                keypoint_mask_patch = np.rot90(keypoint_mask_patch, rot_index, [0, 1]).copy()
+                road_mask_patch = np.rot90(road_mask_patch, rot_index, [0, 1]).copy()
+
+            # STEP 5: GENERATE GRAPH LABELS
+            with open(sample["graph"], "rb") as f:
+                gt_graph_adj = pickle.load(f)
+
+            graph_label_generator = GraphLabelGenerator(
+                self.config,
+                gt_graph_adj,
+                self.coord_transform
+            )
+            
+            patch_coords = ((begin_x, begin_y), (end_x, end_y))
+            graph_points, topo_samples = graph_label_generator.sample_patch(patch_coords, rot_index)
+            pairs, connected, valid = zip(*topo_samples)
+
+            # STEP 6: RETURN TENSORS
+            return {
+                'rgb': torch.tensor(rgb_patch, dtype=torch.float32),
+                'keypoint_mask': torch.tensor(keypoint_mask_patch, dtype=torch.float32) / 255.0,
+                'road_mask': torch.tensor(road_mask_patch, dtype=torch.float32) / 255.0,
+                
+                'graph_points': torch.tensor(graph_points, dtype=torch.float32),
+                'pairs': torch.tensor(pairs, dtype=torch.int32),
+                'connected': torch.tensor(connected, dtype=torch.bool),
+                'valid': torch.tensor(valid, dtype=torch.bool),
+            }
