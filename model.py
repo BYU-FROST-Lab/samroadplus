@@ -559,8 +559,20 @@ class SAMRoadplus(pl.LightningModule):
         # [B, N_samples, N_pairs, 1]
         topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
         topo_loss *= topo_loss_mask.unsqueeze(-1)
-        topo_loss = topo_loss.sum() / topo_loss_mask.sum()
+        # topo_loss = topo_loss.sum() / topo_loss_mask.sum()
+        # Calculate the sum of the mask
+        mask_sum = topo_loss_mask.sum()
+
+        # Only divide if there are valid edges, otherwise set topo_loss to 0
+        if mask_sum > 0:
+            topo_loss = topo_loss.sum() / mask_sum
+        else:
+            # Safely assign 0.0 if the batch had no valid connections
+            topo_loss = torch.tensor(0.0, device=topo_loss.device)
+
         loss = mask_loss + topo_loss
+
+        # Need to fix val_topo_loss and val_loss for globalscale
         self.log('val_mask_loss', mask_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_topo_loss', topo_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)

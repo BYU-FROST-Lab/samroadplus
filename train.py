@@ -11,6 +11,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from lightning.pytorch.callbacks import LearningRateMonitor
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
@@ -41,14 +42,14 @@ if __name__ == "__main__":
     dev_run = args.dev_run or args.fast_dev_run
     
     # start a new wandb run to track this script
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="",
-        # track hyperparameters and run metadata
-        config=config,
-        # disable wandb if debugging
-        mode='disabled' if dev_run else None
-    )
+    # wandb.init(
+    #     # set the wandb project where this run will be logged
+    #     project="",
+    #     # track hyperparameters and run metadata
+    #     config=config,
+    #     # disable wandb if debugging
+    #     mode='disabled' if dev_run else None
+    # )
     # Good when model architecture/input shape are fixed.
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.enabled = True
@@ -73,14 +74,15 @@ if __name__ == "__main__":
         pin_memory=True,
         collate_fn=graph_collate_fn,
     )
-    checkpoint_callback = ModelCheckpoint(every_n_epochs=1, save_top_k=-1)
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=3, mode="min")
     lr_monitor = LearningRateMonitor(logging_interval='step')
+    early_stop_callback = EarlyStopping(monitor="val_loss", patience=15, mode="min", verbose=True)
     wandb_logger = WandbLogger()
     trainer = pl.Trainer(
         max_epochs=config.TRAIN_EPOCHS,
         check_val_every_n_epoch=1,
         num_sanity_val_steps=2,
-        callbacks=[checkpoint_callback, lr_monitor],
+        callbacks=[checkpoint_callback, lr_monitor, early_stop_callback],
         logger=wandb_logger,
         fast_dev_run=args.fast_dev_run,
         

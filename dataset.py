@@ -271,7 +271,7 @@ class SatMapDataset(Dataset):
         
             # coord-transform = (r, c) -> (x, y)
             # takes [N, 2] points
-            self,coord_transform = lambda v : v[:, ::-1]
+            self.coord_transform = lambda v : v[:, ::-1]
 
         elif self.config.DATASET == 'globalscale':
             DIR_GS = os.path.join(BASE_DIR, self.config.DATASET)
