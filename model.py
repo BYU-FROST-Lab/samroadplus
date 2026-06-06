@@ -19,6 +19,56 @@ import torchvision
 import numpy as np
 import vitdet
 
+# ============================================================
+# CBAM: Convolutional Block Attention Module (Woo et al., 2018)
+# ============================================================
+class ChannelAttention(nn.Module):
+    """Learns which feature channels carry road-relevant information."""
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        mid = max(channels // reduction, 8)
+        self.mlp = nn.Sequential(
+            nn.Linear(channels, mid, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid, channels, bias=False),
+        )
+
+    def forward(self, x):
+        # x: [B, C, H, W]
+        avg_out = self.mlp(x.mean(dim=[2, 3]))  # [B, C]
+        max_out = self.mlp(x.amax(dim=[2, 3]))  # [B, C]
+        weights = torch.sigmoid(avg_out + max_out)  # [B, C]
+        return x * weights.unsqueeze(-1).unsqueeze(-1)
+
+
+class SpatialAttention(nn.Module):
+    """Learns which pixel locations are road-relevant."""
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        padding = 3 if kernel_size == 7 else 1
+        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=padding, bias=False)
+
+    def forward(self, x):
+        # x: [B, C, H, W]
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        pooled = torch.cat([avg_out, max_out], dim=1)
+        weights = torch.sigmoid(self.conv(pooled))
+        return x * weights
+
+
+class CBAM(nn.Module):
+    """Combined Channel and Spatial Attention."""
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(channels, reduction)
+        self.sa = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        x = self.ca(x)
+        x = self.sa(x)
+        return x
+
 
 def find_highest_mask_point(x, y, mask, device='cuda'):
     H, W, D = mask.shape
@@ -362,16 +412,31 @@ class SAMRoadplus(pl.LightningModule):
         else:
             #### Naive decoder
             activation = nn.GELU
-            self.map_decoder = nn.Sequential(
-                nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
-                LayerNorm2d(128),
-                activation(),
-                nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
-                activation(),
-                nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
-                activation(),
-                nn.ConvTranspose2d(32,  2, kernel_size=2, stride=2),
-            )
+            if getattr(self.config, 'USE_CBAM', False):
+                self.map_decoder = nn.Sequential(
+                    nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
+                    LayerNorm2d(128),
+                    activation(),
+                    CBAM(128),
+                    nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+                    activation(),
+                    CBAM(64),
+                    nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
+                    activation(),
+                    CBAM(32),
+                    nn.ConvTranspose2d(32,  2, kernel_size=2, stride=2),
+                )
+            else:
+                self.map_decoder = nn.Sequential(
+                    nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
+                    LayerNorm2d(128),
+                    activation(),
+                    nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+                    activation(),
+                    nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
+                    activation(),
+                    nn.ConvTranspose2d(32,  2, kernel_size=2, stride=2),
+                )
         #### TOPONet
         self.bilinear_sampler = BilinearSampler(config)
         self.topo_net = TopoNet(config, 256)
