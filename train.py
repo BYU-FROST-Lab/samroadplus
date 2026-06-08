@@ -76,13 +76,13 @@ if __name__ == "__main__":
     )
     checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=3, mode="min")
     lr_monitor = LearningRateMonitor(logging_interval='step')
-    early_stop_callback = EarlyStopping(monitor="val_loss", patience=15, mode="min", verbose=True)
+    # early_stop_callback = EarlyStopping(monitor="val_loss", patience=15, mode="min", verbose=True)
     wandb_logger = WandbLogger()
     trainer = pl.Trainer(
         max_epochs=config.TRAIN_EPOCHS,
         check_val_every_n_epoch=1,
         num_sanity_val_steps=2,
-        callbacks=[checkpoint_callback, lr_monitor, early_stop_callback],
+        callbacks=[checkpoint_callback, lr_monitor],
         logger=wandb_logger,
         fast_dev_run=args.fast_dev_run,
         
@@ -90,5 +90,5 @@ if __name__ == "__main__":
       
         gradient_clip_val=1.0, 
         )
-    # trainer.fit(net, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=args.resume)
-    trainer.fit(net, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    ckpt_path = args.resume if args.resume else None
+    trainer.fit(net, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path)
