@@ -513,8 +513,11 @@ class SAMRoadplus(pl.LightningModule):
         x = rgb.permute(0, 3, 1, 2)
         # [B, C, H, W]
         x = (x - self.pixel_mean) / self.pixel_std
-        # [B, D, h, w]
-        image_embeddings = self.image_encoder(x)
+        encoder_output = self.image_encoder(x)
+        if isinstance(encoder_output, dict):
+            image_embeddings = encoder_output.get("vision_features")
+        else:
+            image_embeddings = encoder_output
         # mask_logits, mask_scores: [B, 2, H, W]
         if self.config.USE_SAM_DECODER:
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
