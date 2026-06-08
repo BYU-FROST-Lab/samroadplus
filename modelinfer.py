@@ -245,7 +245,7 @@ class SAMRoadplus(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h'}
+        assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h', 'sam2_hiera_b+'}
         if config.SAM_VERSION == 'vit_b':
             ### SAM config (B)
             encoder_embed_dim=768
@@ -284,6 +284,13 @@ class SAMRoadplus(pl.LightningModule):
             ### im1k + mae pre-trained vitb
             self.image_encoder = vitdet.VITBEncoder(image_size=image_size, output_feature_dim=prompt_embed_dim)
             self.matched_param_names = self.image_encoder.matched_param_names
+        elif getattr(self.config, 'SAM_VERSION', '') == 'sam2_hiera_b+':
+            import sys, os
+            sys.path.append(os.path.abspath('sam2_source'))
+            from sam2.build_sam import build_sam2
+            print(f"Building SAM 2 from {config.SAM_CKPT_PATH}...")
+            sam2_model = build_sam2("configs/sam2.1/sam2.1_hiera_b+.yaml", config.SAM_CKPT_PATH)
+            self.image_encoder = sam2_model.image_encoder
         else:
             ### SAM vitb
             self.image_encoder = ImageEncoderViT(
@@ -402,30 +409,34 @@ class SAMRoadplus(pl.LightningModule):
 
         if self.config.NO_SAM:
             return
-        with open(config.SAM_CKPT_PATH, "rb") as f:
-            ckpt_state_dict = torch.load(f)
-
-            ## Resize pos embeddings, if needed
-            if image_size != 1024:
-                new_state_dict = self.resize_sam_pos_embed(ckpt_state_dict, image_size, vit_patch_size, encoder_global_attn_indexes)
-                ckpt_state_dict = new_state_dict
             
-            matched_names = []
-            mismatch_names = []
-            state_dict_to_load = {}
-            for k, v in self.named_parameters():
-                if k in ckpt_state_dict and v.shape == ckpt_state_dict[k].shape:
-                    matched_names.append(k)
-                    state_dict_to_load[k] = ckpt_state_dict[k]
-                else:
-                    mismatch_names.append(k)
-            print("###### Matched params ######")
-            pprint.pprint(matched_names)
-            print("###### Mismatched params ######")
-            pprint.pprint(mismatch_names)
+        if getattr(self.config, 'SAM_VERSION', '') == 'sam2_hiera_b+':
+            self.matched_param_names = set('image_encoder.' + k for k, _ in self.image_encoder.named_parameters())
+        else:
+            with open(config.SAM_CKPT_PATH, "rb") as f:
+                ckpt_state_dict = torch.load(f)
 
-            self.matched_param_names = set(matched_names)
-            self.load_state_dict(state_dict_to_load, strict=False)
+                ## Resize pos embeddings, if needed
+                if image_size != 1024:
+                    new_state_dict = self.resize_sam_pos_embed(ckpt_state_dict, image_size, vit_patch_size, encoder_global_attn_indexes)
+                    ckpt_state_dict = new_state_dict
+                
+                matched_names = []
+                mismatch_names = []
+                state_dict_to_load = {}
+                for k, v in self.named_parameters():
+                    if k in ckpt_state_dict and v.shape == ckpt_state_dict[k].shape:
+                        matched_names.append(k)
+                        state_dict_to_load[k] = ckpt_state_dict[k]
+                    else:
+                        mismatch_names.append(k)
+                print("###### Matched params ######")
+                pprint.pprint(matched_names)
+                print("###### Mismatched params ######")
+                pprint.pprint(mismatch_names)
+
+                self.matched_param_names = set(matched_names)
+                self.load_state_dict(state_dict_to_load, strict=False)
 
     def resize_sam_pos_embed(self, state_dict, image_size, vit_patch_size, encoder_global_attn_indexes):
         new_state_dict = {k : v for k, v in state_dict.items()}
@@ -457,7 +468,11 @@ class SAMRoadplus(pl.LightningModule):
         # [B, C, H, W]
         x = (x - self.pixel_mean) / self.pixel_std
         # [B, D, h, w]
-        image_embeddings = self.image_encoder(x)
+        encoder_output = self.image_encoder(x)
+        if isinstance(encoder_output, dict):
+            image_embeddings = encoder_output.get("vision_features")
+        else:
+            image_embeddings = encoder_output
         # mask_logits, mask_scores: [B, 2, H, W]
         if self.config.USE_SAM_DECODER:
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
