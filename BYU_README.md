@@ -6,6 +6,7 @@ Following the cloning of the repo follow these steps to get your environment set
 ```bash
 conda env create -f environment.yml
 conda activate samroadplus
+conda install -y -c conda-forge go
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
@@ -37,3 +38,24 @@ Clone the following repositories:
 
 Clone [sam_road](https://github.com/htcr/sam_road) repository but only keep 'config' folder. This folder will be needed when running 'train.py' as described in main README.
 
+## Recent Improvements
+
+### 1. Training & Hyperparameters
+- **Checkpoint Resuming**: The training script (`train.py`) now supports resuming from a checkpoint. You can use the `--resume` flag (e.g., `--resume path/to/checkpoint.ckpt`).
+- **Early Stopping Disabled**: The restrictive 15-epoch early stopping constraint was removed. The model will now consistently train for the full 250 epochs defined in the configurations.
+- **Hardware Optimization**: The `toponet_vitb_512_cityscale.yaml` config has been optimized for high-memory GPUs (e.g. RTX 6000). The batch size was increased from 8 to 32, and the learning rate was linearly scaled from 0.001 to 0.002 to ensure optimal convergence.
+
+### 2. Standalone Benchmarking
+We have implemented a self-contained benchmarking script (`benchmark_eval.py`) that entirely removes the need to use the external Sat2Graph repository for evaluation.
+- It features a native Python implementation of the TOPO metric (Precision, Recall, F1).
+- It runs the APLS metric natively via a Go subprocess (which is why `go` is included in the installation steps).
+
+**How to run evaluation:**
+1. First, run the inference script on your checkpoint to generate the graph files:
+    ```bash
+    python inferencer.py --config config/toponet_vitb_512_cityscale.yaml --checkpoint path/to/model.ckpt --output_dir save/output_my_run
+    ```
+2. Then, run the standalone benchmark script on the generated graphs:
+    ```bash
+    python benchmark_eval.py --graph_dir save/save/output_my_run/graph --label my_run
+    ```
