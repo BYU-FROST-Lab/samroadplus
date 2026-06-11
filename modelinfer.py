@@ -245,7 +245,9 @@ class SAMRoadplus(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h'}
+        self.is_dinov3 = hasattr(config, 'BACKBONE') and 'dinov3' in config.BACKBONE
+        if not self.is_dinov3:
+            assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h', 'sam2_hiera_b+'}
         if config.SAM_VERSION == 'vit_b':
             ### SAM config (B)
             encoder_embed_dim=768
@@ -280,7 +282,13 @@ class SAMRoadplus(pl.LightningModule):
         self.register_buffer("pixel_mean", torch.Tensor([123.675, 116.28, 103.53]).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor([58.395, 57.12, 57.375]).view(-1, 1, 1), False)
 
-        if self.config.NO_SAM:
+        if self.is_dinov3:
+            from transformers import AutoModel
+            self.image_encoder = AutoModel.from_pretrained(config.BACKBONE_NAME)
+            prompt_embed_dim = 256
+            encoder_output_dim = 768
+            image_embedding_size = self.image_size // 16
+        elif self.config.NO_SAM:
             ### im1k + mae pre-trained vitb
             self.image_encoder = vitdet.VITBEncoder(image_size=image_size, output_feature_dim=prompt_embed_dim)
             self.matched_param_names = self.image_encoder.matched_param_names
@@ -338,7 +346,7 @@ class SAMRoadplus(pl.LightningModule):
             )
         #### TOPONet
         self.bilinear_sampler = BilinearSampler(config)
-        self.topo_net = TopoNet(config, 256)
+        self.topo_net = TopoNet(config, encoder_output_dim)
         #### LORA
         if config.ENCODER_LORA:
             r = self.config.LORA_RANK
@@ -400,7 +408,8 @@ class SAMRoadplus(pl.LightningModule):
         self.road_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
         self.topo_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
 
-        if self.config.NO_SAM:
+        if getattr(self.config, 'NO_SAM', False) or self.is_dinov3:
+            self.matched_param_names = [f"image_encoder.{k}" for k, _ in self.image_encoder.named_parameters()]
             return
         with open(config.SAM_CKPT_PATH, "rb") as f:
             ckpt_state_dict = torch.load(f)
@@ -498,9 +507,17 @@ class SAMRoadplus(pl.LightningModule):
         x = rgb.permute(0, 3, 1, 2)
         # [B, C, H, W]
         x = (x - self.pixel_mean) / self.pixel_std
-        # [B, D, h, w]
-        image_embeddings = self.image_encoder(x)
-        # mask_logits, mask_scores: [B, 2, H, W]
+        if self.is_dinov3:
+            outputs = self.image_encoder(pixel_values=x, output_hidden_states=True)
+            image_embeddings = outputs.hidden_states[4] # [B, 768, 16, 16]
+            image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
+        else:
+            encoder_output = self.image_encoder(x)
+            if isinstance(encoder_output, dict):
+                image_embeddings = encoder_output.get("vision_features")
+            else:
+                image_embeddings = encoder_output
+        # mask_logits: [B, 2, H, W]
         if self.config.USE_SAM_DECODER:
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
                 points=None, boxes=None, masks=None
