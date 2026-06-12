@@ -16,7 +16,7 @@ import os
 import matplotlib.pyplot as plt
 import torch
 
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+# removed CPU hardcoding
 
 parser = ArgumentParser()
 parser.add_argument(
