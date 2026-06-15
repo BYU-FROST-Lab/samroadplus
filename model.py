@@ -285,7 +285,12 @@ class SAMRoadplus(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h'}
+        self.is_sam2 = getattr(config, 'SAM_VERSION', '') == 'sam2_hiera_b+'
+        self.is_dinov3 = hasattr(config, 'BACKBONE') and 'dinov3' in config.BACKBONE
+        self.is_radio = hasattr(config, 'BACKBONE') and 'radio' in config.BACKBONE
+        
+        if not (self.is_dinov3 or self.is_radio):
+            assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h', 'sam2_hiera_b+'}
         if config.SAM_VERSION == 'vit_b':
             ### SAM config (B)
             encoder_embed_dim=768
@@ -316,7 +321,27 @@ class SAMRoadplus(pl.LightningModule):
         encoder_output_dim = prompt_embed_dim
         self.register_buffer("pixel_mean", torch.Tensor([123.675, 116.28, 103.53]).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor([58.395, 57.12, 57.375]).view(-1, 1, 1), False)
-        if self.config.NO_SAM:
+        if self.is_dinov3:
+            from transformers import AutoModel
+            self.image_encoder = AutoModel.from_pretrained(config.BACKBONE_NAME)
+            prompt_embed_dim = 256
+            encoder_output_dim = 768
+            image_embedding_size = self.image_size // 16
+        elif self.is_radio:
+            from transformers import AutoModel
+            self.image_encoder = AutoModel.from_pretrained(config.BACKBONE_NAME, trust_remote_code=True)
+            prompt_embed_dim = 256
+            encoder_output_dim = 768
+            image_embedding_size = self.image_size // 16
+        elif self.is_sam2:
+            import sys, os
+            if os.path.abspath('sam2_source') not in sys.path:
+                sys.path.append(os.path.abspath('sam2_source'))
+            from sam2.build_sam import build_sam2
+            print(f"Building SAM 2 from {config.SAM_CKPT_PATH}...")
+            sam2_model = build_sam2("configs/sam2.1/sam2.1_hiera_b+.yaml", config.SAM_CKPT_PATH)
+            self.image_encoder = sam2_model.image_encoder
+        elif getattr(self.config, 'NO_SAM', False):
             ### im1k + mae pre-trained vitb
             self.image_encoder = vitdet.VITBEncoder(image_size=image_size, output_feature_dim=prompt_embed_dim)
             self.matched_param_names = self.image_encoder.matched_param_names
@@ -374,7 +399,7 @@ class SAMRoadplus(pl.LightningModule):
             )
         #### TOPONet
         self.bilinear_sampler = BilinearSampler(config)
-        self.topo_net = TopoNet(config, 256)
+        self.topo_net = TopoNet(config, encoder_output_dim)
         #### LORA
         if config.ENCODER_LORA:
             r = self.config.LORA_RANK
@@ -433,32 +458,38 @@ class SAMRoadplus(pl.LightningModule):
         self.keypoint_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
         self.road_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
         self.topo_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
-        if self.config.NO_SAM:
+        if getattr(self.config, 'NO_SAM', False) or self.is_dinov3 or self.is_radio:
+            if self.is_dinov3 or self.is_radio:
+                self.matched_param_names = [f"image_encoder.{k}" for k, _ in self.image_encoder.named_parameters()]
             return
-        with open(config.SAM_CKPT_PATH, "rb") as f:
-            ckpt_state_dict = torch.load(f)
-
-            ## Resize pos embeddings, if needed
-            if image_size != 1024:
-                new_state_dict = self.resize_sam_pos_embed(ckpt_state_dict, image_size, vit_patch_size, encoder_global_attn_indexes)
-                ckpt_state_dict = new_state_dict
             
-            matched_names = []
-            mismatch_names = []
-            state_dict_to_load = {}
-            for k, v in self.named_parameters():
-                if k in ckpt_state_dict and v.shape == ckpt_state_dict[k].shape:
-                    matched_names.append(k)
-                    state_dict_to_load[k] = ckpt_state_dict[k]
-                else:
-                    mismatch_names.append(k)
-            print("###### Matched params ######")
-            pprint.pprint(matched_names)
-            print("###### Mismatched params ######")
-            pprint.pprint(mismatch_names)
+        if self.is_sam2:
+            self.matched_param_names = set('image_encoder.' + k for k, _ in self.image_encoder.named_parameters())
+        else:
+            with open(config.SAM_CKPT_PATH, "rb") as f:
+                ckpt_state_dict = torch.load(f)
 
-            self.matched_param_names = set(matched_names)
-            self.load_state_dict(state_dict_to_load, strict=False)
+                ## Resize pos embeddings, if needed
+                if image_size != 1024:
+                    new_state_dict = self.resize_sam_pos_embed(ckpt_state_dict, image_size, vit_patch_size, encoder_global_attn_indexes)
+                    ckpt_state_dict = new_state_dict
+                
+                matched_names = []
+                mismatch_names = []
+                state_dict_to_load = {}
+                for k, v in self.named_parameters():
+                    if k in ckpt_state_dict and v.shape == ckpt_state_dict[k].shape:
+                        matched_names.append(k)
+                        state_dict_to_load[k] = ckpt_state_dict[k]
+                    else:
+                        mismatch_names.append(k)
+                print("###### Matched params ######")
+                pprint.pprint(matched_names)
+                print("###### Mismatched params ######")
+                pprint.pprint(mismatch_names)
+
+                self.matched_param_names = set(matched_names)
+                self.load_state_dict(state_dict_to_load, strict=False)
     def resize_sam_pos_embed(self, state_dict, image_size, vit_patch_size, encoder_global_attn_indexes):
         new_state_dict = {k : v for k, v in state_dict.items()}
         pos_embed = new_state_dict['image_encoder.pos_embed']
@@ -487,8 +518,22 @@ class SAMRoadplus(pl.LightningModule):
         x = rgb.permute(0, 3, 1, 2)
         # [B, C, H, W]
         x = (x - self.pixel_mean) / self.pixel_std
-        # [B, D, h, w]
-        image_embeddings = self.image_encoder(x)#[16, 256, 32, 32]
+        
+        if self.is_dinov3:
+            outputs = self.image_encoder(pixel_values=x, output_hidden_states=True)
+            image_embeddings = outputs.hidden_states[4] # [B, 768, 16, 16]
+            image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
+        elif self.is_radio:
+            from einops import rearrange
+            summary, features = self.image_encoder(x)
+            # features is [B, 1024, 768]
+            image_embeddings = rearrange(features, 'b (h w) d -> b d h w', h=32, w=32)
+        else:
+            encoder_output = self.image_encoder(x)
+            if isinstance(encoder_output, dict):
+                image_embeddings = encoder_output.get("vision_features")
+            else:
+                image_embeddings = encoder_output
         #print(image_embeddings.shape)
         # mask_logits, mask_scores: [B, 2, H, W]
         if self.config.USE_SAM_DECODER:
