@@ -59,3 +59,21 @@ We have implemented a self-contained benchmarking script (`benchmark_eval.py`) t
     ```bash
     python benchmark_eval.py --graph_dir save/save/output_my_run/graph --label my_run
     ```
+
+### 3. Unified Foundation Model Architecture
+The architecture has been unified to dynamically support multiple foundation models directly from the `main` branch. You can seamlessly switch between **SAM 1**, **SAM 2**, **DINOv3**, and **RADIO** simply by specifying the corresponding configuration file.
+
+**Supported Models & Configurations:**
+- **SAM 1 (Baseline)**: `--config config/toponet_vitb_512_cityscale.yaml`
+- **SAM 2**: `--config config/toponet_sam2_512_cityscale.yaml`
+- **DINOv3**: `--config config/toponet_dinov3_512_cityscale.yaml`
+- **NVIDIA RADIO**: `--config config/toponet_radio_512_cityscale.yaml`
+
+**Additional Dependencies:**
+To run the extended foundation models, ensure you have installed the newly appended dependencies in `requirements.txt` (which are already included in the standard install steps):
+```bash
+pip install timm einops transformers open_clip_torch
+```
+
+**Architecture Details:**
+The codebase uses a Factory Pattern in `model.py` and `modelinfer.py` to route backbone initialization and feature extraction dynamically based on the configuration file (via the `BACKBONE` or `SAM_VERSION` keys). This removes the need to checkout separate branches for each model.
