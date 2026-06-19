@@ -14,7 +14,9 @@ pip install -r requirements.txt
 Download the following (__check official README for where to place files__):
 
 - SAM model checkpoint
-    - ["vit_b" SAM model under 'Model Checkpoints'](https://github.com/facebookresearch/segment-anything?tab=readme-ov-file)
+    - Vanilla SAM: ["vit_b" SAM model under 'Model Checkpoints'](https://github.com/facebookresearch/segment-anything?tab=readme-ov-file)
+    - SAM 2: Download the `sam2.1_hiera_base_plus.pt` checkpoint and add it to the `sam_ckpts` folder (just as you did for vanilla SAM).
+    - DINOv3 & RADIO: No manual checkpoint downloads are required! They will be automatically downloaded and cached by `timm` and `torch.hub` upon first run.
 - spacenet dataset
     - [RGB_1.0_meter_full.zip](https://drive.google.com/uc?id=1FiZVkEEEVir_iUJpEH5NQunrtlG0Ff1W)
 - cityscale dataset
@@ -35,6 +37,14 @@ Clone the following repositories:
     git clone https://github.com/facebookresearch/detectron2.git
     pip install -e . --no-build-isolation
     ```
+- [SAM 2](https://github.com/facebookresearch/sam2)
+    ```bash
+    git clone https://github.com/facebookresearch/sam2.git
+    cd sam2
+    pip install -e .
+    cd ..
+    ```
+    *(Note: DINOv3 and RADIO dependencies are purely Python-based and are handled automatically by the `requirements.txt` via `timm` and `torch.hub`)*
 
 Clone [sam_road](https://github.com/htcr/sam_road) repository but only keep 'config' folder. This folder will be needed when running 'train.py' as described in main README.
 
