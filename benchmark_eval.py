@@ -226,12 +226,33 @@ if __name__ == "__main__":
                         help="Run only TOPO, skip APLS")
     parser.add_argument("--apls_only", action="store_true",
                         help="Run only APLS, skip TOPO")
+    parser.add_argument("--dataset", default="cityscale", choices=["cityscale", "globalscale", "globalscale_ood"],
+                        help="Which dataset to evaluate on")
     args = parser.parse_args()
 
-    _, _, test_indices = cityscale_data_partition()
+    if args.dataset == "globalscale":
+        GT_DIR = os.path.join(BASE_DIR, "globalscale", "Global-Scale", "in-domain-test")
+        test_indices = []
+        if os.path.exists(args.graph_dir):
+            for f in os.listdir(args.graph_dir):
+                if f.endswith('.p'):
+                    test_indices.append(int(f.replace('.p', '')))
+        test_indices.sort()
+    elif args.dataset == "globalscale_ood":
+        GT_DIR = os.path.join(BASE_DIR, "globalscale", "Global-Scale", "out_of_domain")
+        test_indices = []
+        if os.path.exists(args.graph_dir):
+            for f in os.listdir(args.graph_dir):
+                if f.endswith('.p'):
+                    test_indices.append(int(f.replace('.p', '')))
+        test_indices.sort()
+    else:
+        GT_DIR = os.path.join(BASE_DIR, "cityscale", "20cities")
+        _, _, test_indices = cityscale_data_partition()
+
     if args.num_tiles > 0:
         test_indices = test_indices[:args.num_tiles]
-    print(f"Evaluating {len(test_indices)} test tiles: {test_indices}")
+    print(f"Evaluating {len(test_indices)} test tiles for {args.dataset}")
 
     run_topo_flag = not args.apls_only
     run_apls_flag = not args.topo_only

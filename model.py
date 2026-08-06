@@ -280,6 +280,142 @@ class _LoRA_qkv(nn.Module):
         qkv[:, :, :, -self.dim:] += new_v
         return qkv
 
+class ChannelAttention(nn.Module):
+    """Learns which feature channels carry road-relevant information."""
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        mid = max(channels // reduction, 8)
+        self.mlp = nn.Sequential(
+            nn.Linear(channels, mid, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid, channels, bias=False),
+        )
+
+    def forward(self, x):
+        avg_out = self.mlp(x.mean(dim=[2, 3]))  
+        max_out = self.mlp(x.amax(dim=[2, 3]))  
+        weights = torch.sigmoid(avg_out + max_out)  
+        return x * weights.unsqueeze(-1).unsqueeze(-1)
+
+
+class SpatialAttention(nn.Module):
+    """Learns which pixel locations are road-relevant."""
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        pad = kernel_size // 2
+        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=pad, bias=False)
+
+    def forward(self, x):
+        avg_out = x.mean(dim=1, keepdim=True)   
+        max_out = x.amax(dim=1, keepdim=True)   
+        spatial_weights = torch.sigmoid(self.conv(torch.cat([avg_out, max_out], dim=1)))
+        return x * spatial_weights
+
+
+class CBAMBlock(nn.Module):
+    """Sequential Channel + Spatial attention."""
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super().__init__()
+        self.channel_attn = ChannelAttention(channels, reduction)
+        self.spatial_attn = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        x = self.channel_attn(x)
+        x = self.spatial_attn(x)
+        return x
+
+class UpBlock(nn.Module):
+    def __init__(self, in_channels, skip_channels, out_channels, use_cbam=False):
+        super().__init__()
+        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.conv = nn.Sequential(
+            nn.Conv2d(out_channels + skip_channels, out_channels, kernel_size=3, padding=1),
+            LayerNorm2d(out_channels),
+            nn.GELU(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            LayerNorm2d(out_channels),
+            nn.GELU()
+        )
+        self.cbam = CBAMBlock(out_channels) if use_cbam else nn.Identity()
+        
+    def forward(self, x, skip=None):
+        x = self.up(x)
+        if skip is not None:
+            if x.shape[-2:] != skip.shape[-2:]:
+                skip = F.interpolate(skip, size=x.shape[-2:], mode="bilinear", align_corners=False)
+            x = torch.cat([x, skip], dim=1)
+        x = self.conv(x)
+        return self.cbam(x)
+
+class MapDecoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, use_cbam=False):
+        super().__init__()
+        self.up = nn.Sequential(
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2),
+            LayerNorm2d(out_channels),
+            nn.GELU()
+        )
+        self.cbam = CBAMBlock(out_channels) if use_cbam else nn.Identity()
+        
+    def forward(self, x):
+        return self.cbam(self.up(x))
+
+class MapDecoder(nn.Module):
+    def __init__(self, encoder_output_dim, use_cbam=False):
+        super().__init__()
+        self.block1 = MapDecoderBlock(encoder_output_dim, 128, use_cbam)
+        self.block2 = MapDecoderBlock(128, 64, use_cbam)
+        self.block3 = MapDecoderBlock(64, 32, use_cbam)
+        self.final_conv = nn.ConvTranspose2d(32,  2, kernel_size=2, stride=2)
+        self.topo_proj = nn.Conv2d(64, 256, kernel_size=1)
+        
+    def forward(self, x):
+        x = self.block1(x)
+        high_res = self.block2(x)
+        x = self.block3(high_res)
+        return self.final_conv(x), self.topo_proj(high_res)
+
+class SkipDecoder(nn.Module):
+    def __init__(self, backbone_type, use_cbam=False):
+        super().__init__()
+        self.backbone_type = backbone_type
+        self.blocks = nn.ModuleList()
+        if backbone_type == 'dinov3':
+            # feats: 16x16(768), 32x32(384), 64x64(192), 128x128(96)
+            self.blocks.append(UpBlock(768, 384, 256, use_cbam)) # 16->32
+            self.blocks.append(UpBlock(256, 192, 128, use_cbam)) # 32->64
+            self.blocks.append(UpBlock(128, 96, 64, use_cbam))   # 64->128
+            self.blocks.append(UpBlock(64, 0, 32, use_cbam))     # 128->256
+            self.blocks.append(UpBlock(32, 0, 16, use_cbam))     # 256->512
+            self.topo_idx = 2
+        elif backbone_type == 'sam2':
+            # feats: 32x32(256), 64x64(256), 128x128(256)
+            self.blocks.append(UpBlock(256, 256, 128, use_cbam)) # 32->64
+            self.blocks.append(UpBlock(128, 256, 64, use_cbam))  # 64->128
+            self.blocks.append(UpBlock(64, 0, 32, use_cbam))     # 128->256
+            self.blocks.append(UpBlock(32, 0, 16, use_cbam))     # 256->512
+            self.topo_idx = 1
+        else: # radio or sam1
+            dim = 768 if backbone_type == 'radio' else 256
+            self.blocks.append(UpBlock(dim, 0, 128, use_cbam)) # 32->64
+            self.blocks.append(UpBlock(128, 0, 64, use_cbam))  # 64->128
+            self.blocks.append(UpBlock(64, 0, 32, use_cbam))   # 128->256
+            self.blocks.append(UpBlock(32, 0, 16, use_cbam))   # 256->512
+            self.topo_idx = 1
+            
+        self.final_conv = nn.Conv2d(16, 2, kernel_size=1)
+        self.topo_proj = nn.Conv2d(64, 256, kernel_size=1)
+
+    def forward(self, features):
+        x = features[0]
+        high_res = None
+        for i, block in enumerate(self.blocks):
+            skip = features[i+1] if (i+1) < len(features) else None
+            x = block(x, skip)
+            if i == self.topo_idx:
+                high_res = x
+        return self.final_conv(x), self.topo_proj(high_res)
+
 class SAMRoadplus(pl.LightningModule):
     """This is the RelationFormer module that performs object detection"""
     def __init__(self, config):
@@ -385,18 +521,19 @@ class SAMRoadplus(pl.LightningModule):
                 iou_head_hidden_dim=256,
             )
         else:
-            #### Naive decoder
-            activation = nn.GELU
-            self.map_decoder = nn.Sequential(
-                nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
-                LayerNorm2d(128),
-                activation(),
-                nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
-                activation(),
-                nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
-                activation(),
-                nn.ConvTranspose2d(32,  2, kernel_size=2, stride=2),
-            )
+            use_cbam = getattr(self.config, 'USE_CBAM', False)
+            self.map_decoder = MapDecoder(encoder_output_dim, use_cbam=use_cbam)
+            if getattr(self.config, 'USE_SKIP_CONNECTIONS', False) and (self.is_sam2 or self.is_dinov3):
+                backbone_type = 'dinov3' if self.is_dinov3 else 'sam2'
+                use_cbam = getattr(self.config, 'USE_CBAM', False)
+                self.skip_decoder = SkipDecoder(backbone_type, use_cbam=use_cbam)
+                print(f"==================================================")
+                print(f" => USING SKIP-CONNECTIONS FOR {backbone_type.upper()}")
+                if use_cbam:
+                    print(f" => USING CBAM ATTENTION IN SKIP DECODER")
+                if getattr(self.config, 'USE_HIGH_RES_TOPO', False):
+                    print(f" => WIRING HIGH-RES FEATURES (128x128) DIRECTLY TO TOPONET")
+                print(f"==================================================")
         #### TOPONet
         self.bilinear_sampler = BilinearSampler(config)
         self.topo_net = TopoNet(config, encoder_output_dim)
@@ -455,9 +592,9 @@ class SAMRoadplus(pl.LightningModule):
         self.road_iou = BinaryJaccardIndex(threshold=0.5)
         self.topo_f1 = F1Score(task='binary', threshold=0.5, ignore_index=-1)
         # testing only, not used in training
-        self.keypoint_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
-        self.road_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
-        self.topo_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
+        self.keypoint_pr_curve = BinaryPrecisionRecallCurve(thresholds=100, ignore_index=-1)
+        self.road_pr_curve = BinaryPrecisionRecallCurve(thresholds=100, ignore_index=-1)
+        self.topo_pr_curve = BinaryPrecisionRecallCurve(thresholds=100, ignore_index=-1)
         if getattr(self.config, 'NO_SAM', False) or self.is_dinov3 or self.is_radio:
             if self.is_dinov3 or self.is_radio:
                 self.matched_param_names = [f"image_encoder.{k}" for k, _ in self.image_encoder.named_parameters()]
@@ -519,21 +656,29 @@ class SAMRoadplus(pl.LightningModule):
         # [B, C, H, W]
         x = (x - self.pixel_mean) / self.pixel_std
         
+        decoder_features = None
         if self.is_dinov3:
             outputs = self.image_encoder(pixel_values=x, output_hidden_states=True)
             image_embeddings = outputs.hidden_states[4] # [B, 768, 16, 16]
+            decoder_features = [outputs.hidden_states[i] for i in [4, 3, 2, 1]]
             image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
         elif self.is_radio:
             from einops import rearrange
             summary, features = self.image_encoder(x)
             # features is [B, 1024, 768]
             image_embeddings = rearrange(features, 'b (h w) d -> b d h w', h=32, w=32)
+            decoder_features = [image_embeddings]
         else:
             encoder_output = self.image_encoder(x)
             if isinstance(encoder_output, dict):
                 image_embeddings = encoder_output.get("vision_features")
+                if "backbone_fpn" in encoder_output:
+                    decoder_features = [image_embeddings, encoder_output["backbone_fpn"][1], encoder_output["backbone_fpn"][0]]
+                else:
+                    decoder_features = [image_embeddings]
             else:
                 image_embeddings = encoder_output
+                decoder_features = [image_embeddings]
         #print(image_embeddings.shape)
         # mask_logits, mask_scores: [B, 2, H, W]
         if self.config.USE_SAM_DECODER:
@@ -555,9 +700,18 @@ class SAMRoadplus(pl.LightningModule):
             )
             mask_scores = torch.sigmoid(mask_logits)
         else:
-            mask_logits = self.map_decoder(image_embeddings)
+            if getattr(self.config, 'USE_SKIP_CONNECTIONS', False) and hasattr(self, 'skip_decoder'):
+                mask_logits, topo_features = self.skip_decoder(decoder_features)
+            else:
+                mask_logits, topo_features = self.map_decoder(image_embeddings)
             mask_scores = torch.sigmoid(mask_logits)#torch.Size([16, 3, 512, 512])
-        point_features,newpoint,point_features_o = self.bilinear_sampler(image_embeddings, graph_points,mask_scores)
+            
+        if getattr(self.config, 'USE_HIGH_RES_TOPO', False) and not self.config.USE_SAM_DECODER:
+            final_topo_features = topo_features
+        else:
+            final_topo_features = image_embeddings
+            
+        point_features,newpoint,point_features_o = self.bilinear_sampler(final_topo_features, graph_points,mask_scores)
        # point_features = self.bilinear_sampler(image_embeddings, graph_points,mask_logits)
         # [B, N_sample, N_pair, 1]
        # topo_logits, topo_scores = self.topo_net(graph_points, point_features, pairs, valid) 
@@ -671,6 +825,7 @@ class SAMRoadplus(pl.LightningModule):
             print(f'======= {category} ======')   
             precision, recall, thresholds = pr_curve_metric.compute()
             f1_scores = 2 * (precision * recall) / (precision + recall)
+            f1_scores = torch.nan_to_num(f1_scores, nan=0.0)
             best_threshold_index = torch.argmax(f1_scores)
             best_threshold = thresholds[best_threshold_index]
             best_precision = precision[best_threshold_index]
@@ -709,10 +864,16 @@ class SAMRoadplus(pl.LightningModule):
             }
             decoder_params = [matched_decoder_params, fresh_decoder_params]
         else:
-            decoder_params = [{
-                'params': [p for p in self.map_decoder.parameters()],
-                'lr': self.config.BASE_LR
-            }]
+            if getattr(self.config, 'USE_SKIP_CONNECTIONS', False) and hasattr(self, 'skip_decoder'):
+                decoder_params = [{
+                    'params': [p for p in self.skip_decoder.parameters()],
+                    'lr': self.config.BASE_LR
+                }]
+            else:
+                decoder_params = [{
+                    'params': [p for p in self.map_decoder.parameters()],
+                    'lr': self.config.BASE_LR
+                }]
         param_dicts += decoder_params
 
         topo_net_params = [{

@@ -16,7 +16,9 @@ Download the following (__check official README for where to place files__):
 - SAM model checkpoint
     - Vanilla SAM: ["vit_b" SAM model under 'Model Checkpoints'](https://github.com/facebookresearch/segment-anything?tab=readme-ov-file)
     - SAM 2: Download the `sam2.1_hiera_base_plus.pt` checkpoint and add it to the `sam_ckpts` folder (just as you did for vanilla SAM).
-    - DINOv3 & RADIO: No manual checkpoint downloads are required! They will be automatically downloaded and cached by `timm` and `torch.hub` upon first run.
+    - DINOv3 & RADIO: No manual checkpoint downloads are required; they are automatically downloaded and cached by `timm` and `torch.hub` upon first run.
+        - **Important for DINOv3:** You will need a [Hugging Face account](https://huggingface.co/) to access the weights. Please ensure you have accepted the model terms on the Hugging Face website for the specific DINOv3 model, and log in via your terminal using `huggingface-cli login` before running the code.
+        - **RADIO:** Requires no accounts or permissions. It downloads openly and directly via NVIDIA's TorchHub.
 - spacenet dataset
     - [RGB_1.0_meter_full.zip](https://drive.google.com/uc?id=1FiZVkEEEVir_iUJpEH5NQunrtlG0Ff1W)
 - cityscale dataset
