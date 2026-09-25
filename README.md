@@ -2,7 +2,7 @@
 
 <h1>What Transfers to Road Topology? A Controlled Study of Foundation-Model Representations Across Architectures and Geographic Domains</h1>
 
-<img src="img/main.png" width="100%"/>
+<img src="img/main.svg" width="100%"/>
 
 <p align="center">
   <i>Overview of our arbitrary backbone encoder-decoder architecture and graph extraction pipeline for comparison purposes. Built upon the original <a href="https://github.com/earth-insights/samroadplus">SAM-Road++</a> architecture.</i>
