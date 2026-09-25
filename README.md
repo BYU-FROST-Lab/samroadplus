@@ -9,7 +9,7 @@
 </p>
 
 ## Abstract
-> *Road network graph extraction from satellite imagery is critical for autonomous navigation, urban planning, and disaster response. While vision foundation models have demonstrated strong performance in pixel-level segmentation, it remains unclear which representational properties transfer effectively to graph-level topology extraction—a task requiring not only accurate road detection but also correct long-range connectivity. In this work, we systematically evaluate four modern foundation-model backbones—SAM, SAM2.1, DINOv3, and C-RADIOv3—within a unified topology extraction framework. We further investigate whether common architectural augmentations, including Feature Pyramid Networks and attention mechanisms, can improve topological connectivity. Our results reveal two key findings. First, backbone selection has a substantially larger impact on graph connectivity (APLS) than any architectural modification. SAM 2.1 achieves a significant APLS improvement over the prior SAM baseline on the CityScale dataset. This result is consistent with the hypothesis that pre-training objectives emphasizing spatial boundary localization transfer more effectively to topological routing than semantic or multi-teacher distilled objectives. Second, architectural augmentations consistently fail to improve topology metrics, with APLS declining across the evaluated augmentations. We further demonstrate the scalability of the selected configuration on the GlobalScale dataset, showing that the observed gains extend beyond a single benchmark. Our work identifies SAM2.1 as the strongest-performing backbone among the evaluated models for road topology extraction, and our findings suggest that backbone representation plays a larger role than architectural augmentation in determining graph-level performance.*
+> *Road network graph extraction from satellite imagery is critical for autonomous navigation, urban planning, and disaster response. While vision foundation models have demonstrated strong performance in pixel-level segmentation, it remains unclear which representational properties transfer effectively to graph-level topology extraction—a task requiring not only accurate road detection but also correct long-range connectivity. In this work, we systematically evaluate four modern foundation-model backbones—SAM, SAM2.1, DINOv3, and C-RADIOv3—within a unified topology extraction framework. We compare performance across two distinct decoding paradigms: our segmentation-based TopoNet and a modularized PyTorch implementation of the Graph Tensor Encoding (GTE) pipeline originally proposed in Sat2Graph. We further investigate whether common architectural augmentations, including Feature Pyramid Networks and attention mechanisms, can improve topological connectivity. Our results reveal two key findings. First, backbone selection has a substantially larger impact on graph connectivity (APLS) than any architectural modification. SAM 2.1 achieves a significant APLS improvement over the prior SAM baseline on the CityScale dataset. This result is consistent with the hypothesis that pre-training objectives emphasizing spatial boundary localization transfer more effectively to topological routing than semantic or multi-teacher distilled objectives. Second, architectural augmentations consistently fail to improve topology metrics, with APLS declining across the evaluated augmentations. We further demonstrate the scalability of the selected configuration on the GlobalScale dataset, showing that the observed gains extend beyond a single benchmark. Our work identifies SAM2.1 as the strongest-performing backbone among the evaluated models for road topology extraction, and our findings suggest that backbone representation plays a larger role than architectural augmentation in determining graph-level performance.*
 
 
 </div>
@@ -65,17 +65,31 @@ Download the datasets and place them in the root directory:
 - **SpaceNet:** [RGB_1.0_meter_full.zip](https://drive.google.com/uc?id=1FiZVkEEEVir_iUJpEH5NQunrtlG0Ff1W)
 - **CityScale:** [20cities](https://drive.google.com/drive/folders/1FlMcO3Jr8W4qboZUwxgRn6AlYc-AuxQ2)
 
-## Unified Foundation Model Architecture
+## Unified Foundation Model Architecture & Pipelines
 
-The architecture has been unified to dynamically support multiple foundation models directly from the `main` branch. You can seamlessly switch between **SAM 1**, **SAM 2**, **DINOv3**, **RADIO**, and **ResNet50** simply by specifying the corresponding configuration file.
+The architecture has been unified to dynamically support multiple foundation models across **two distinct evaluation pipelines** directly from the `main` branch:
+1. **Segmentation Pipeline (TopoNet)**: The original segmentation-based SAM-Road++ methodology.
+2. **Graph Tensor Encoding Pipeline (GTE)**: A modularized PyTorch implementation of the Sat2Graph methodology for direct graph topology regression.
+
+You can seamlessly switch between **SAM 1**, **SAM 2**, **DINOv3**, **RADIO**, and **ResNet50** backbones simply by specifying the corresponding configuration file.
+
+### Configuration Directory Structure
+The `config/` directory has been restructured to cleanly separate the two pipelines:
+- `config/segmentation/<dataset>/`: Contains configurations for the TopoNet segmentation pipeline.
+- `config/gte/<dataset>/`: Contains configurations for the GTE pipeline.
+
+The codebase uses a Factory Pattern in `train.py` to route backbone initialization, dataset loading, and feature extraction dynamically based on the configuration file (via the `MODEL_TYPE` key set to `'segmentation'` or `'gte'`). 
+
+### The `NO_VFM` Baseline (Pure DLA)
+To properly ablate the impact of Vision Foundation Models (VFMs) on the GTE pipeline against the original Sat2Graph model, we have provided an exact PyTorch port of Sat2Graph's TensorFlow Deep Layer Aggregation (DLA) ResNet architecture.
+- By setting `NO_VFM: True` in any GTE configuration file, the training loop will bypass all foundation models and initialize the raw PyTorch DLA baseline.
 
 **Supported Models & Configurations (Examples):**
-- **SAM 1 (Baseline)**: `--config config/cityscale/toponet_vitb_512_cityscale.yaml`
-- **SAM 2**: `--config config/cityscale/toponet_sam2_512_cityscale.yaml`
-- **DINOv3**: `--config config/cityscale/toponet_dinov3_512_cityscale.yaml`
-- **NVIDIA RADIO**: `--config config/cityscale/toponet_radio_512_cityscale.yaml`
-
-The codebase uses a Factory Pattern in `model.py` and `modelinfer.py` to route backbone initialization and feature extraction dynamically based on the configuration file (via the `BACKBONE` or `SAM_VERSION` keys). This removes the need to checkout separate branches for each model.
+- **SAM 1 (Segmentation Baseline)**: `--config config/segmentation/cityscale/toponet_vitb_512_cityscale.yaml`
+- **SAM 2 (GTE)**: `--config config/gte/cityscale/gte_sam2_512_cityscale.yaml`
+- **DINOv3 (Segmentation)**: `--config config/segmentation/cityscale/toponet_dinov3_512_cityscale.yaml`
+- **NVIDIA RADIO (GTE)**: `--config config/gte/cityscale/gte_radio_512_cityscale.yaml`
+- **NO_VFM Baseline (Sat2Graph DLA)**: `--config config/gte/cityscale/gte_no_vfm_512_cityscale.yaml`
 
 ## Architectural Augmentation Ablations
 
@@ -107,9 +121,13 @@ python test.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml -
 ```
 
 ### 3. Inference
-Generate the predicted graphs.
+Generate the predicted graphs depending on your configured `MODEL_TYPE`:
 ```bash
-python inferencer.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
+# For Segmentation (TopoNet)
+python inferencer.py --config config/segmentation/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
+
+# For GTE (Sat2Graph)
+python infer_gte.py --config config/gte/globalscale/gte_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
 ```
 
 ### 4. Metrics Evaluation (APLS & TOPO)

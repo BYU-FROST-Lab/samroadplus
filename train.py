@@ -4,8 +4,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from utils import load_config
-from dataset import SatMapDataset, graph_collate_fn
+from dataset import SatMapDataset as SatMapDataset_Seg, graph_collate_fn as graph_collate_fn_Seg
 from model import SAMRoadplus
+from dataset_gte import SatMapDataset as SatMapDataset_GTE, graph_collate_fn as graph_collate_fn_GTE
+from model_gte import SAMGraph
 import wandb
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -54,9 +56,19 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.enabled = True
 
-    net = SAMRoadplus(config)
+    model_type = getattr(config, 'MODEL_TYPE', 'segmentation').lower()
+    if model_type == 'gte':
+        print("Initializing GTE Pipeline (SAMGraph)...")
+        net = SAMGraph(config)
+        DatasetClass = SatMapDataset_GTE
+        collate_fn = graph_collate_fn_GTE
+    else:
+        print("Initializing Segmentation Pipeline (SAMRoadplus)...")
+        net = SAMRoadplus(config)
+        DatasetClass = SatMapDataset_Seg
+        collate_fn = graph_collate_fn_Seg
 
-    train_ds, val_ds = SatMapDataset(config, is_train=True, dev_run=dev_run), SatMapDataset(config, is_train=False, dev_run=dev_run)
+    train_ds, val_ds = DatasetClass(config, is_train=True, dev_run=dev_run), DatasetClass(config, is_train=False, dev_run=dev_run)
 
     train_loader = DataLoader(
         train_ds,
@@ -64,7 +76,7 @@ if __name__ == "__main__":
         shuffle=True,
         num_workers=config.DATA_WORKER_NUM,
         pin_memory=True,
-        collate_fn=graph_collate_fn,
+        collate_fn=collate_fn,
     )
     val_loader = DataLoader(
         val_ds,
@@ -72,7 +84,7 @@ if __name__ == "__main__":
         shuffle=False, 
         num_workers=config.DATA_WORKER_NUM,
         pin_memory=True,
-        collate_fn=graph_collate_fn,
+        collate_fn=collate_fn,
     )
     checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=3, mode="min")
     lr_monitor = LearningRateMonitor(logging_interval='step')
