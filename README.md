@@ -5,8 +5,11 @@
 ## Abstract
 > *Road network graph extraction from satellite imagery is critical for autonomous navigation, urban planning, and disaster response. While vision foundation models have demonstrated strong performance in pixel-level segmentation, it remains unclear which representational properties transfer effectively to graph-level topology extraction—a task requiring not only accurate road detection but also correct long-range connectivity. In this work, we systematically evaluate four modern foundation-model backbones—SAM, SAM2.1, DINOv3, and C-RADIOv3—within a unified topology extraction framework. We further investigate whether common architectural augmentations, including Feature Pyramid Networks and attention mechanisms, can improve topological connectivity. Our results reveal two key findings. First, backbone selection has a substantially larger impact on graph connectivity (APLS) than any architectural modification. SAM 2.1 achieves a significant APLS improvement over the prior SAM baseline on the CityScale dataset. This result is consistent with the hypothesis that pre-training objectives emphasizing spatial boundary localization transfer more effectively to topological routing than semantic or multi-teacher distilled objectives. Second, architectural augmentations consistently fail to improve topology metrics, with APLS declining across the evaluated augmentations. We further demonstrate the scalability of the selected configuration on the GlobalScale dataset, showing that the observed gains extend beyond a single benchmark. Our work identifies SAM2.1 as the strongest-performing backbone among the evaluated models for road topology extraction, and our findings suggest that backbone representation plays a larger role than architectural augmentation in determining graph-level performance.*
 
-<img src="https://https://github.com/BYU-FROST-Lab/samroadplus/blob/main/img/main.png" width="100%"/>
-Overview of our arbitrary backbone encoder-decoder architecture and graph extraction pipeline for comparison purposes. Built upon original - [SAM-Road++](https://github.com/earth-insights/samroadplus) architecture.
+<img src="img/main.png" width="100%"/>
+
+<p align="center">
+  <i>Overview of our arbitrary backbone encoder-decoder architecture and graph extraction pipeline for comparison purposes. Built upon the original <a href="https://github.com/earth-insights/samroadplus">SAM-Road++</a> architecture.</i>
+</p>
 
 </div>
 
