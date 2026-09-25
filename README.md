@@ -1,103 +1,102 @@
 <div align="center">
 
-<h1>Towards Satellite Image Road Graph Extraction: A Global-Scale Dataset and A Novel Method</h1>
-
-
-<div>
-    <a href='https://github.com/Morefree303' target='_blank'>Pan Yin</a><sup>1*</sup>&emsp;
-    <a href='https://likyoo.github.io/' target='_blank'>Kaiyu Li</a><sup>1*</sup>&emsp;
-    <a href='https://gr.xjtu.edu.cn/en/web/caoxiangyong' target='_blank'>Xiangyong Cao</a><sup>✉1</sup>&emsp;
-    <a href='https://scholar.google.com/citations?hl=zh-CN&user=1SHd5ygAAAAJ' target='_blank'>Jing Yao</a><sup>2</sup>&emsp;
-    <a href='https://web.xidian.edu.cn/leiliusee' target='_blank'>Lei Liu</a><sup>3</sup>&emsp;
-    <a href='https://web.xidian.edu.cn/xrbai' target='_blank'>Xueru Bai</a><sup>3</sup>&emsp;
-    <a href='https://faculty.xidian.edu.cn/ZF3' target='_blank'>Feng Zhou</a><sup>3</sup>&emsp;
-    <a href='https://gr.xjtu.edu.cn/en/web/dymeng' target='_blank'>Deyu Meng</a><sup>1</sup>&emsp;
-</div>
-<div>
-    <sup>1</sup>Xi'an Jiaotong University&emsp;
-    <sup>2</sup>Chinese Academy of Sciences&emsp;
-    <sup>3</sup>Xidian University&emsp;
-</div>
-
-<div>
-    <h4 align="center"> 
-        • <a href="https://github.com/earth-insights/samroadplus" target='_blank'>[Project]</a> • <a href="https://arxiv.org/abs/2411.16733" target='_blank'>[arXiv]</a> • <a href="https://pan.baidu.com/s/18HFMWV1VESFxZg25nCH4kw?pwd=fnku" target='_blank'>[Dataset]</a> • 
-    </h4>
-</div>
-<img src="https://github.com/earth-insights/samroadplus/blob/main/img/overview.PNG" width="100%"/>
-Overview of our proposed SAM-Road++. The <font color="red">red line</font> indicates training only and the  <font color="blue"> blue line</font> indicates inference only.
+<h1>What Transfers to Road Topology? A Controlled Study of Foundation-Model Representations Across Architectures and Geographic Domains</h1>
 
 </div>
 
 ## Abstract
-> *Recently, road graph extraction has garnered increasing attention due to its crucial role in autonomous driving, navigation, etc. However, accurately and efficiently extracting road graphs remains a persistent challenge, primarily due to the severe scarcity of labeled data. To address this limitation, we collect a global-scale satellite road graph extraction dataset, i.e. Global-Scale dataset. Specifically, the Global-Scale dataset is ~20× larger than the largest existing public road extraction dataset and spans over 13,800 km^2 globally. Additionally, we develop a novel road graph extraction model, i.e. SAM-Road++, which adopts a node-guided resampling method to alleviate the mismatch issue between training and inference in SAM-Road, a pioneering state-of-the-art road graph extraction model. Furthermore, we propose a simple yet effective "extended-line" strategy in SAM-Road++ to mitigate the occlusion issue on the road. Extensive experiments demonstrate the validity of the collected Global-Scale dataset and the proposed SAM-Road++ method, particularly highlighting its superior predictive power in unseen regions.*
+> *Road network graph extraction from satellite imagery is critical for autonomous navigation, urban planning, and disaster response. While vision foundation models have demonstrated strong performance in pixel-level segmentation, it remains unclear which representational properties transfer effectively to graph-level topology extraction—a task requiring not only accurate road detection but also correct long-range connectivity. In this work, we systematically evaluate four modern foundation-model backbones—SAM, SAM2.1, DINOv3, and C-RADIOv3—within a unified topology extraction framework. We further investigate whether common architectural augmentations, including Feature Pyramid Networks and attention mechanisms, can improve topological connectivity. Our results reveal two key findings. First, backbone selection has a substantially larger impact on graph connectivity (APLS) than any architectural modification. SAM 2.1 achieves a significant APLS improvement over the prior SAM baseline on the CityScale dataset. This result is consistent with the hypothesis that pre-training objectives emphasizing spatial boundary localization transfer more effectively to topological routing than semantic or multi-teacher distilled objectives. Second, architectural augmentations consistently fail to improve topology metrics, with APLS declining across the evaluated augmentations. We further demonstrate the scalability of the selected configuration on the GlobalScale dataset, showing that the observed gains extend beyond a single benchmark. Our work identifies SAM2.1 as the strongest-performing backbone among the evaluated models for road topology extraction, and our findings suggest that backbone representation plays a larger role than architectural augmentation in determining graph-level performance.*
 
 ## Installation
-You need the following:
-- an Nvidia GPU with latest CUDA and driver.
-- the latest pytorch.
-- pytorch lightning.
-- wandb.
-- Go, just for the APLS metric.
-- and pip install whatever is missing.
+Following the cloning of the repo, follow these steps to get your environment set up:
 
-## Getting Started
-
-### SAM Preparation
-Download the ViT-B checkpoint from the official SAM directory. Put it under:  
-```
--sam_road++  
---sam_ckpts  
----sam_vit_b_01ec64.pth  
+```bash
+conda env create -f environment.yml
+conda activate samroadplus
+conda install -y -c conda-forge go
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+pip install -r requirements.txt
 ```
 
-### Data Preparation
-Refer to the instructions in the sam_road repo to download City-scale and SpaceNet datasets.
-Put them in the main directory, structure like:  
-```
--sam_road++  
---cityscale  
----20cities  
---spacenet  
----RGB_1.0_meter  
-```
-And run python generate_labes.py under both dirs.
+### External Dependencies
+Clone the following repositories into the root directory:
 
-For Global-scale, refer to cityscale for data preparation.
-### Training
-City-scale dataset:  
-
-```
-python train.py --config=config/cityscale/toponet_vitb_512_cityscale.yaml  
+**1. Segment Anything Model (SAM)**
+```bash
+mkdir sam && cd sam
+git clone git@github.com:facebookresearch/segment-anything.git
+cd segment-anything && pip install -e .
+mv segment_anything ../
+cd ../../
 ```
 
-Glbale-scale dataset:
-```
-python train.py --config=config/globalscale/toponet_vitb_512_globalscale.yaml
-```
-or
-```
-python train.py --config=config/archived/toponet_vitb_256_globalscale.yaml
+**2. Detectron2**
+```bash
+git clone https://github.com/facebookresearch/detectron2.git
+pip install -e . --no-build-isolation
 ```
 
-
-SpaceNet dataset:
+**3. SAM 2**
+```bash
+git clone https://github.com/facebookresearch/sam2.git
+cd sam2
+pip install -e .
+cd ..
 ```
-python train.py --config=config/spacenet/toponet_vitb_256_spacenet.yaml 
+*(Note: DINOv3 and RADIO dependencies are purely Python-based and are handled automatically by the `requirements.txt` via `timm` and `torch.hub`)*
+
+## Data & Checkpoint Preparation
+
+### Model Checkpoints
+- **Vanilla SAM:** Download the ["vit_b" SAM model](https://github.com/facebookresearch/segment-anything?tab=readme-ov-file) and place it in the `sam_ckpts/` directory.
+- **SAM 2:** Download the `sam2.1_hiera_base_plus.pt` checkpoint and add it to the `sam_ckpts/` folder.
+- **DINOv3 & RADIO:** No manual checkpoint downloads are required; they are automatically downloaded and cached by `timm` and `torch.hub` upon first run.
+  - **Important for DINOv3:** You will need a [Hugging Face account](https://huggingface.co/) to access the weights. Please ensure you have accepted the model terms on the Hugging Face website for the specific DINOv3 model, and log in via your terminal using `huggingface-cli login` before running the code.
+
+### Datasets
+Download the datasets and place them in the root directory:
+- **SpaceNet:** [RGB_1.0_meter_full.zip](https://drive.google.com/uc?id=1FiZVkEEEVir_iUJpEH5NQunrtlG0Ff1W)
+- **CityScale:** [20cities](https://drive.google.com/drive/folders/1FlMcO3Jr8W4qboZUwxgRn6AlYc-AuxQ2)
+
+## Unified Foundation Model Architecture
+
+The architecture has been unified to dynamically support multiple foundation models directly from the `main` branch. You can seamlessly switch between **SAM 1**, **SAM 2**, **DINOv3**, **RADIO**, and **ResNet50** simply by specifying the corresponding configuration file.
+
+**Supported Models & Configurations (Examples):**
+- **SAM 1 (Baseline)**: `--config config/cityscale/toponet_vitb_512_cityscale.yaml`
+- **SAM 2**: `--config config/cityscale/toponet_sam2_512_cityscale.yaml`
+- **DINOv3**: `--config config/cityscale/toponet_dinov3_512_cityscale.yaml`
+- **NVIDIA RADIO**: `--config config/cityscale/toponet_radio_512_cityscale.yaml`
+
+The codebase uses a Factory Pattern in `model.py` and `modelinfer.py` to route backbone initialization and feature extraction dynamically based on the configuration file (via the `BACKBONE` or `SAM_VERSION` keys). This removes the need to checkout separate branches for each model.
+
+## Evaluation Pipeline (J-STARS Benchmarking)
+
+To train and evaluate any of the foundation models (e.g., DINOv3 on GlobalScale), follow this 4-step pipeline:
+
+### 1. Train
+*Note: The training script (`train.py`) now supports resuming from a checkpoint using the `--resume` flag.*
+```bash
+python train.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml
 ```
 
-You can find the checkpoints under lightning_logs dir.
-
-### Inference
+### 2. Hyperparameter Optimization (Threshold Sweeping)
+Extract the optimal thresholds for keypoint, road, and topology extraction on the validation set. Update your config file with these thresholds.
+```bash
+python test.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
 ```
-python inferencer.py --config=path_to_the_same_config_for_training --checkpoint=path_to_ckpt  
+
+### 3. Inference
+Generate the predicted graphs.
+```bash
+python inferencer.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
 ```
 
-### Test
-For APLS and TOPO metrics, please move to [Sat2Graph](https://github.com/songtaohe/Sat2Graph). It is worth mentioning that the metrics used to test our Global-scale datasets are the same as those used for the Cityscale datasets.
-
-## J-STARS Foundation Model Benchmarks
-For the IEEE J-STARS journal extension, this repository includes support for evaluating various Foundation Model backbones (SAM, SAM2, DINOv2, DINOv3, RADIO) and ResNet50 on the GlobalScale and CityScale datasets.
+### 4. Metrics Evaluation (APLS & TOPO)
+We have implemented a self-contained benchmarking script (`benchmark_eval.py`) that entirely removes the need to use the external Sat2Graph repository for evaluation.
+```bash
+python benchmark_eval.py --dataset globalscale --graph_dir save/output_dir/graph
+```
 
 ### Reproducing the Complexity Table
 To evaluate the parameter count, FLOPs, latency, and VRAM for all foundation models, run:
@@ -105,58 +104,11 @@ To evaluate the parameter count, FLOPs, latency, and VRAM for all foundation mod
 python benchmark_models.py
 ```
 
-### Evaluation Pipeline
-To train and evaluate any of the foundation models (e.g., DINOv3 on GlobalScale), follow this 4-step pipeline:
-
-1. **Train**:
-   ```bash
-   python train.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml
-   ```
-2. **Hyperparameter Optimization (Threshold Sweeping)**:
-   Extract the optimal thresholds for keypoint, road, and topology extraction on the validation set. Update your config file with these thresholds.
-   ```bash
-   python test.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
-   ```
-3. **Inference**:
-   Generate the predicted graphs.
-   ```bash
-   python inferencer.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
-   ```
-4. **Metrics Evaluation (APLS & TOPO)**:
-   Evaluate the generated graphs against the ground truth.
-   ```bash
-   python benchmark_eval.py --dataset globalscale --graph_dir save/output_dir/graph
-   ```
-
-## Demos
-<img src="https://github.com/earth-insights/samroadplus/blob/main/img/vis.PNG" width="100%"/>
-Visual road network graph prediction based on SAM-Road++ and two currently advanced methods.
-
-
-
-
-## Citation
-
-```
-@article{yin2024satelliteimageroadgraph,
-  title={Towards Satellite Image Road Graph Extraction: A Global-Scale Dataset and A Novel Method},
-  author={Yin, Pan and Li, Kaiyu and Cao, Xiangyong and Yao, Jing and Liu, Lei and Bai, Xueru and Zhou, Feng and Meng, Deyu},
-  journal={arXiv preprint arXiv:2411.16733},
-  year={2024}
-}
-```
-
 ## Acknowledgement
 We sincerely appreciate the authors of the following codebases which made this project possible:
+- [SAM-Road++](https://github.com/earth-insights/samroadplus) (The core architecture this project builds upon)
 - [Segment Anything Model](https://github.com/facebookresearch/segment-anything)  
 - [SAM_Road](https://github.com/htcr/sam_road) 
 - [Sat2Graph](https://github.com/songtaohe/Sat2Graph)
 - [SAMed](https://github.com/hitachinsk/SAMed)  
 - [Detectron2](https://github.com/facebookresearch/detectron2)  
-
-## TODO List
-- [x] Basic instructions
-- [x] Organize configs
-- [x] Add dependency list
-- [ ] Add demos
-- [ ] Add trained checkpoints
