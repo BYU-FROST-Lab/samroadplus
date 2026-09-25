@@ -99,6 +99,12 @@ Generate the predicted graphs.
 python inferencer.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
 ```
 
+### 4. Metrics Evaluation (APLS & TOPO)
+We have implemented a self-contained benchmarking script (`benchmark_eval.py`) that entirely removes the need to use the external Sat2Graph repository for evaluation.
+```bash
+python benchmark_eval.py --dataset globalscale --graph_dir save/output_dir/graph
+```
+
 ## Architectural Augmentation Ablations
 
 This codebase also natively supports toggling various architectural decoder augmentations for ablation studies (FPN, CBAM, HD) as detailed in the paper. These features can be enabled by adding the following boolean flags directly into your chosen `.yaml` configuration file (e.g., `config/cityscale/toponet_sam2_512_cityscale.yaml`):
@@ -112,11 +118,6 @@ This codebase also natively supports toggling various architectural decoder augm
 
 *Note: As demonstrated in our paper, when using highly robust backbones like SAM 2.1, these augmentations may actually decrease topological connectivity (APLS) by introducing unnecessary optimization complexity!*
 
-### 4. Metrics Evaluation (APLS & TOPO)
-We have implemented a self-contained benchmarking script (`benchmark_eval.py`) that entirely removes the need to use the external Sat2Graph repository for evaluation.
-```bash
-python benchmark_eval.py --dataset globalscale --graph_dir save/output_dir/graph
-```
 
 ### Reproducing the Complexity Table
 To evaluate the parameter count, FLOPs, latency, and VRAM for all foundation models, run:
