@@ -77,6 +77,19 @@ The architecture has been unified to dynamically support multiple foundation mod
 
 The codebase uses a Factory Pattern in `model.py` and `modelinfer.py` to route backbone initialization and feature extraction dynamically based on the configuration file (via the `BACKBONE` or `SAM_VERSION` keys). This removes the need to checkout separate branches for each model.
 
+## Architectural Augmentation Ablations
+
+This codebase also natively supports toggling various architectural decoder augmentations for ablation studies (FPN, CBAM, HD) as detailed in the paper. These features can be enabled by adding the following boolean flags directly into your chosen `.yaml` configuration file (e.g., `config/cityscale/toponet_sam2_512_cityscale.yaml`):
+
+- **Feature Pyramid Networks (FPN):** To enable lateral multi-scale feature fusion in the decoder, add:
+  `USE_SKIP_DECODER: True`
+- **Convolutional Block Attention Module (CBAM):** To inject channel and spatial attention blocks into the decoder, add:
+  `USE_CBAM: True`
+- **High-Resolution Topology Features (HD):** To extract and pass higher-resolution features directly to TopoNet for finer-grained vertex sampling, add:
+  `USE_HIGH_RES_TOPO: True`
+
+*Note: As demonstrated in our paper, when using highly robust backbones like SAM 2.1, these augmentations may actually decrease topological connectivity (APLS) by introducing unnecessary optimization complexity!*
+
 ## Evaluation Pipeline (J-STARS Benchmarking)
 
 To train and evaluate any of the foundation models (e.g., DINOv3 on GlobalScale), follow this 4-step pipeline:
@@ -104,20 +117,6 @@ We have implemented a self-contained benchmarking script (`benchmark_eval.py`) t
 ```bash
 python benchmark_eval.py --dataset globalscale --graph_dir save/output_dir/graph
 ```
-
-## Architectural Augmentation Ablations
-
-This codebase also natively supports toggling various architectural decoder augmentations for ablation studies (FPN, CBAM, HD) as detailed in the paper. These features can be enabled by adding the following boolean flags directly into your chosen `.yaml` configuration file (e.g., `config/cityscale/toponet_sam2_512_cityscale.yaml`):
-
-- **Feature Pyramid Networks (FPN):** To enable lateral multi-scale feature fusion in the decoder, add:
-  `USE_SKIP_DECODER: True`
-- **Convolutional Block Attention Module (CBAM):** To inject channel and spatial attention blocks into the decoder, add:
-  `USE_CBAM: True`
-- **High-Resolution Topology Features (HD):** To extract and pass higher-resolution features directly to TopoNet for finer-grained vertex sampling, add:
-  `USE_HIGH_RES_TOPO: True`
-
-*Note: As demonstrated in our paper, when using highly robust backbones like SAM 2.1, these augmentations may actually decrease topological connectivity (APLS) by introducing unnecessary optimization complexity!*
-
 
 ### Reproducing the Complexity Table
 To evaluate the parameter count, FLOPs, latency, and VRAM for all foundation models, run:
