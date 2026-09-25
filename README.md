@@ -111,6 +111,19 @@ To evaluate the parameter count, FLOPs, latency, and VRAM for all foundation mod
 python benchmark_models.py
 ```
 
+## Architectural Augmentation Ablations
+
+This codebase also natively supports toggling various architectural decoder augmentations for ablation studies (FPN, CBAM, HD) as detailed in the paper. These features can be enabled by adding the following boolean flags directly into your chosen `.yaml` configuration file (e.g., `config/cityscale/toponet_sam2_512_cityscale.yaml`):
+
+- **Feature Pyramid Networks (FPN):** To enable lateral multi-scale feature fusion in the decoder, add:
+  `USE_SKIP_DECODER: True`
+- **Convolutional Block Attention Module (CBAM):** To inject channel and spatial attention blocks into the decoder, add:
+  `USE_CBAM: True`
+- **High-Resolution Topology Features (HD):** To extract and pass higher-resolution features directly to TopoNet for finer-grained vertex sampling, add:
+  `USE_HIGH_RES_TOPO: True`
+
+*Note: As demonstrated in our paper, when using highly robust backbones like SAM 2.1, these augmentations may actually decrease topological connectivity (APLS) by introducing unnecessary optimization complexity!*
+
 ## Acknowledgement
 We sincerely appreciate the authors of the following codebases which made this project possible:
 - [SAM-Road++](https://github.com/earth-insights/samroadplus) (The core architecture this project builds upon)
