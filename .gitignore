@@ -1,0 +1,37 @@
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+env/
+
+# Datasets
+cityscale/20cities/
+cityscale/processed/
+globalscale/Global-Scale/
+globalscale/processed/
+spacenet/RGB_1.0_meter/
+spacenet/processed/
+
+# Weights, Logs, and Checkpoints
+lightning_logs/
+dino_ckpts/
+sam_ckpts/
+wandb/
+
+# Outputs and Inference
+save/
+benchmark_results/
+benchmark_results_validation/
+*.txt
+
+# External Libraries
+detectron2/
+sam/
+src/
