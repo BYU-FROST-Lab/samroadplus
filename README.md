@@ -68,34 +68,65 @@ For Global-scale, refer to cityscale for data preparation.
 City-scale dataset:  
 
 ```
-python train.py --config=config/toponet_vitb_512_cityscale.yaml  
+python train.py --config=config/cityscale/toponet_vitb_512_cityscale.yaml  
 ```
 
 Glbale-scale dataset:
 ```
-python train.py --config=config/toponet_vitb_512_globalscale.yaml
+python train.py --config=config/globalscale/toponet_vitb_512_globalscale.yaml
 ```
 or
 ```
-python train.py --config=config/toponet_vitb_256_globalscale.yaml
+python train.py --config=config/archived/toponet_vitb_256_globalscale.yaml
 ```
 
 
 SpaceNet dataset:
 ```
-python train.py --config=config/toponet_vitb_256_spacenet.yaml 
+python train.py --config=config/spacenet/toponet_vitb_256_spacenet.yaml 
 ```
 
 You can find the checkpoints under lightning_logs dir.
 
 ### Inference
 ```
-python inferencer.py 
---config=path_to_the_same_config_for_training--checkpoint=path_to_ckpt  
+python inferencer.py --config=path_to_the_same_config_for_training --checkpoint=path_to_ckpt  
 ```
 
 ### Test
 For APLS and TOPO metrics, please move to [Sat2Graph](https://github.com/songtaohe/Sat2Graph). It is worth mentioning that the metrics used to test our Global-scale datasets are the same as those used for the Cityscale datasets.
+
+## J-STARS Foundation Model Benchmarks
+For the IEEE J-STARS journal extension, this repository includes support for evaluating various Foundation Model backbones (SAM, SAM2, DINOv2, DINOv3, RADIO) and ResNet50 on the GlobalScale and CityScale datasets.
+
+### Reproducing the Complexity Table
+To evaluate the parameter count, FLOPs, latency, and VRAM for all foundation models, run:
+```bash
+python benchmark_models.py
+```
+
+### Evaluation Pipeline
+To train and evaluate any of the foundation models (e.g., DINOv3 on GlobalScale), follow this 4-step pipeline:
+
+1. **Train**:
+   ```bash
+   python train.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml
+   ```
+2. **Hyperparameter Optimization (Threshold Sweeping)**:
+   Extract the optimal thresholds for keypoint, road, and topology extraction on the validation set. Update your config file with these thresholds.
+   ```bash
+   python test.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
+   ```
+3. **Inference**:
+   Generate the predicted graphs.
+   ```bash
+   python inferencer.py --config config/globalscale/toponet_dinov3_512_globalscale.yaml --checkpoint path_to_ckpt
+   ```
+4. **Metrics Evaluation (APLS & TOPO)**:
+   Evaluate the generated graphs against the ground truth.
+   ```bash
+   python benchmark_eval.py --dataset globalscale --graph_dir save/output_dir/graph
+   ```
 
 ## Demos
 <img src="https://github.com/earth-insights/samroadplus/blob/main/img/vis.PNG" width="100%"/>
@@ -125,7 +156,7 @@ We sincerely appreciate the authors of the following codebases which made this p
 
 ## TODO List
 - [x] Basic instructions
-- [ ] Organize configs
+- [x] Organize configs
 - [x] Add dependency list
 - [ ] Add demos
 - [ ] Add trained checkpoints

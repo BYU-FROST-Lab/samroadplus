@@ -384,8 +384,10 @@ class SAMRoadplus(pl.LightningModule):
         self.is_sam2 = getattr(config, 'SAM_VERSION', '') == 'sam2_hiera_b+'
         self.is_dinov3 = hasattr(config, 'BACKBONE') and 'dinov3' in config.BACKBONE
         self.is_radio = hasattr(config, 'BACKBONE') and 'radio' in config.BACKBONE
+        self.is_resnet = hasattr(config, 'BACKBONE') and 'resnet' in config.BACKBONE
+        self.is_dinov2 = hasattr(config, 'BACKBONE') and config.BACKBONE == 'dinov2'
         
-        if not (self.is_dinov3 or self.is_radio):
+        if not (self.is_dinov3 or self.is_radio or self.is_resnet or self.is_dinov2):
             assert config.SAM_VERSION in {'vit_b', 'vit_l', 'vit_h', 'sam2_hiera_b+'}
         if config.SAM_VERSION == 'vit_b':
             ### SAM config (B)
@@ -420,7 +422,34 @@ class SAMRoadplus(pl.LightningModule):
 
         self.register_buffer("pixel_mean", torch.Tensor([123.675, 116.28, 103.53]).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor([58.395, 57.12, 57.375]).view(-1, 1, 1), False)
-        if self.is_dinov3:
+        if self.is_dinov2:
+            self.image_encoder = torch.hub.load(
+                'facebookresearch/dinov2', 'dinov2_vitb14_reg', pretrained=False
+            )
+            state_dict = torch.load(config.BACKBONE_CKPT_PATH, map_location='cpu')
+            self.image_encoder.load_state_dict(state_dict)
+            self.dinov2_proj = nn.Sequential(
+                nn.Conv2d(768, 256, kernel_size=1, bias=False),
+                LayerNorm2d(256),
+                nn.GELU()
+            )
+            encoder_output_dim = 256
+            image_embedding_size = self.image_size // 16
+        elif self.is_resnet:
+            import torchvision.models as models
+            resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+            self.image_encoder = nn.Sequential(
+                resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool,
+                resnet.layer1, resnet.layer2, resnet.layer3, resnet.layer4
+            )
+            self.resnet_proj = nn.Sequential(
+                nn.Conv2d(2048, 256, kernel_size=1, bias=False),
+                LayerNorm2d(256),
+                nn.GELU()
+            )
+            encoder_output_dim = 256
+            image_embedding_size = self.image_size // 16
+        elif self.is_dinov3:
             from transformers import AutoModel
             self.image_encoder = AutoModel.from_pretrained(config.BACKBONE_NAME)
             prompt_embed_dim = 256
@@ -554,8 +583,8 @@ class SAMRoadplus(pl.LightningModule):
         self.road_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
         self.topo_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
 
-        if getattr(self.config, 'NO_SAM', False) or self.is_dinov3 or self.is_radio:
-            if self.is_dinov3 or self.is_radio:
+        if getattr(self.config, 'NO_SAM', False) or self.is_dinov3 or self.is_radio or self.is_resnet or self.is_dinov2:
+            if self.is_dinov3 or self.is_radio or self.is_resnet or self.is_dinov2:
                 self.matched_param_names = [f"image_encoder.{k}" for k, _ in self.image_encoder.named_parameters()]
             return
             
@@ -618,10 +647,36 @@ class SAMRoadplus(pl.LightningModule):
         x = (x - self.pixel_mean) / self.pixel_std
         
         decoder_features = None
-        if self.is_dinov3:
+        if self.is_dinov2:
+            x_dinov2 = F.interpolate(x, size=(518, 518), mode="bilinear", align_corners=False)
+            feats = self.image_encoder.get_intermediate_layers(
+                x_dinov2, n=1, reshape=True
+            )[0]
+            image_embeddings = self.dinov2_proj(feats)  # [B, 256, 37, 37]
+            image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
+            decoder_features = [image_embeddings]
+        elif self.is_resnet:
+            feats = self.image_encoder(x)  # [B, 2048, 16, 16]
+            image_embeddings = self.resnet_proj(feats)  # [B, 256, 16, 16]
+            image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
+            decoder_features = [image_embeddings]
+        elif self.is_dinov3:
             outputs = self.image_encoder(pixel_values=x, output_hidden_states=True)
-            image_embeddings = outputs.hidden_states[4] # [B, 768, 16, 16]
-            decoder_features = [outputs.hidden_states[i] for i in [4, 3, 2, 1]]
+            # If it's a ViT, hidden_states will have shape [B, N, C]
+            if len(outputs.hidden_states[-1].shape) == 3:
+                from einops import rearrange
+                image_embeddings = outputs.hidden_states[-1]
+                
+                h, w = x.shape[2]//16, x.shape[3]//16
+                num_spatial = h * w
+                if image_embeddings.shape[1] > num_spatial:
+                    image_embeddings = image_embeddings[:, -num_spatial:, :]
+                    
+                image_embeddings = rearrange(image_embeddings, 'b (h w) d -> b d h w', h=h, w=w)
+                decoder_features = [image_embeddings]
+            else:
+                image_embeddings = outputs.hidden_states[4]
+                decoder_features = [outputs.hidden_states[i] for i in [4, 3, 2, 1]]
             image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
         elif self.is_radio:
             from einops import rearrange
@@ -690,10 +745,35 @@ class SAMRoadplus(pl.LightningModule):
         x = (x - self.pixel_mean) / self.pixel_std
         
         decoder_features = None
-        if self.is_dinov3:
+        if self.is_dinov2:
+            x_dinov2 = F.interpolate(x, size=(518, 518), mode="bilinear", align_corners=False)
+            feats = self.image_encoder.get_intermediate_layers(
+                x_dinov2, n=1, reshape=True
+            )[0]
+            image_embeddings = self.dinov2_proj(feats)  # [B, 256, 37, 37]
+            image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
+            decoder_features = [image_embeddings]
+        elif self.is_resnet:
+            feats = self.image_encoder(x)  # [B, 2048, 16, 16]
+            image_embeddings = self.resnet_proj(feats)  # [B, 256, 16, 16]
+            image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
+            decoder_features = [image_embeddings]
+        elif self.is_dinov3:
             outputs = self.image_encoder(pixel_values=x, output_hidden_states=True)
-            image_embeddings = outputs.hidden_states[4] # [B, 768, 16, 16]
-            decoder_features = [outputs.hidden_states[i] for i in [4, 3, 2, 1]]
+            if hasattr(outputs, 'last_hidden_state') and len(outputs.last_hidden_state.shape) == 3:
+                from einops import rearrange
+                image_embeddings = outputs.last_hidden_state
+                
+                h, w = x.shape[2]//16, x.shape[3]//16
+                num_spatial = h * w
+                if image_embeddings.shape[1] > num_spatial:
+                    image_embeddings = image_embeddings[:, -num_spatial:, :]
+                    
+                image_embeddings = rearrange(image_embeddings, 'b (h w) d -> b d h w', h=h, w=w)
+                decoder_features = [image_embeddings]
+            else:
+                image_embeddings = outputs.hidden_states[4]
+                decoder_features = [outputs.hidden_states[i] for i in [4, 3, 2, 1]]
             image_embeddings = F.interpolate(image_embeddings, size=(32, 32), mode="bilinear", align_corners=False)
         elif self.is_radio:
             from einops import rearrange
